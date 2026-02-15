@@ -1,6 +1,4 @@
-# 
-
-WellPlate MVVM Architecture Guide
+# WellPlate MVVM Architecture Guide
 
 **Version:** 1.0
 
