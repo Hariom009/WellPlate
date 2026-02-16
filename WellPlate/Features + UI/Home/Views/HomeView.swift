@@ -25,25 +25,14 @@ struct HomeView: View {
                 // Top Navigation Bar
                 topNavigationBar
                 
-                if viewModel.nutritionalInfo == nil {
-                    // Text Editor Mode - like Notes app
-                    textEditorView
-                } else {
-                    // Results View
-                    ScrollView {
-                        VStack(spacing: 20) {
-                            resultsSection
-                            clearButton
-                        }
-                        .padding()
-                        .padding(.bottom, 120) // Space for expanded goals
-                    }
-                }
+                // Text Editor Mode - Always visible like a notebook
+                textEditorView
                 
                 Spacer()
             }
             
             // Expandable Goals View - Always visible at bottom
+            // This gets updated when analysis completes
             VStack {
                 Spacer()
                 GoalsExpandableView(
@@ -57,7 +46,6 @@ struct HomeView: View {
                     }
                 }
             }
-           // .ignoresSafeArea(edges: .bottom)
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK", role: .cancel) {}
@@ -66,6 +54,14 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showDatePicker) {
             datePickerSheet
+        }
+        .onChange(of: viewModel.nutritionalInfo) { oldValue, newValue in
+            // Auto-expand goals view when new nutritional info is available
+            if newValue != nil && oldValue == nil {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    isGoalsExpanded = true
+                }
+            }
         }
     }
 
@@ -146,15 +142,15 @@ struct HomeView: View {
         .background(Color(.systemGroupedBackground))
     }
     
-    // MARK: - Text Editor View (Notes-like)
+    // MARK: - Text Editor View (Notebook Style)
     
     private var textEditorView: some View {
         ZStack(alignment: .topLeading) {
             // Background that's tappable
             Color(.white)
             
-            VStack(spacing: 12) {
-                // Text Editor - takes full height
+            VStack(spacing: 0) {
+                // Text Editor - takes full height, always visible
                 ZStack(alignment: .topLeading) {
                     // Placeholder text
                     if viewModel.foodDescription.isEmpty {
@@ -168,55 +164,44 @@ struct HomeView: View {
                         .allowsHitTesting(false)
                     }
                     
-                    // The actual text editor
-                    TextEditor(text: $viewModel.foodDescription)
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .focused($isTextEditorFocused)
-                        .disabled(viewModel.isLoading)
-                        .tint(.orange)
-                }
-                
-                // Bottom toolbar with analyze button
-                if !viewModel.foodDescription.isEmpty {
-                    VStack(spacing: 0) {
-                        Divider()
-                        
-                        HStack(spacing: 12) {
-                            // Optional: Serving size quick input
-                            TextField("Serving size", text: $viewModel.servingSize)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.subheadline)
-                                .disabled(viewModel.isLoading)
-                            
-                            // Analyze button
-                            Button(action: {
-                                isTextEditorFocused = false
-                                Task {
-                                    await viewModel.analyzeFood()
+                    // The actual text editor with inline analyze button
+                    HStack(alignment: .top, spacing: 12) {
+                        TextEditor(text: $viewModel.foodDescription)
+                            .font(.body)
+                            .scrollContentBackground(.hidden)
+                            .background(Color.clear)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
+                            .focused($isTextEditorFocused)
+                            .disabled(viewModel.isLoading)
+                            .tint(.orange)
+                            .onSubmit {
+                                // Trigger analysis when Enter/Return is pressed
+                                if !viewModel.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    triggerAnalysis()
                                 }
+                            }
+                            .submitLabel(.done)
+                        
+                        // Inline Analyze Button - appears when there's text
+                        if !viewModel.foodDescription.isEmpty {
+                            Button(action: {
+                                triggerAnalysis()
                             }) {
-                                HStack(spacing: 8) {
+                                Group {
                                     if viewModel.isLoading {
                                         ProgressView()
                                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                            .scaleEffect(0.8)
+                                            .scaleEffect(0.7)
                                     } else {
                                         Image(systemName: "sparkles")
                                             .font(.system(size: 16, weight: .semibold))
                                     }
-                                    
-                                    Text(viewModel.isLoading ? "Analyzing..." : "Analyze")
-                                        .font(.system(size: 16, weight: .semibold))
                                 }
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
+                                .frame(width: 44, height: 44)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
+                                    Circle()
                                         .fill(
                                             LinearGradient(
                                                 colors: [Color.orange, Color.orange.opacity(0.8)],
@@ -228,12 +213,11 @@ struct HomeView: View {
                                 .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
                             }
                             .disabled(viewModel.isLoading)
+                            .padding(.trailing, 16)
+                            .padding(.top, 16)
+                            .transition(.scale.combined(with: .opacity))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(Color(.systemBackground))
                     }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
@@ -242,6 +226,19 @@ struct HomeView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isTextEditorFocused = true
             }
+        }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func triggerAnalysis() {
+        isTextEditorFocused = false
+        // Remove the last newline if it exists (from pressing Enter)
+        if viewModel.foodDescription.hasSuffix("\n") {
+            viewModel.foodDescription.removeLast()
+        }
+        Task {
+            await viewModel.analyzeFood()
         }
     }
     

@@ -1,6 +1,6 @@
 import Foundation
 
-struct NutritionalInfo: Codable, Identifiable {
+struct NutritionalInfo: Codable, Identifiable,Equatable {
     let id: UUID
     let foodName: String
     let servingSize: String?
