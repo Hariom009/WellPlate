@@ -27,7 +27,7 @@ struct WellPlateApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
     }
 

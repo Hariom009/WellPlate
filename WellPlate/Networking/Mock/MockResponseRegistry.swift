@@ -132,7 +132,7 @@ class MockResponseRegistry {
         register(path: "/api/users", method: .post, mockFile: "mock_user_create")
 
         // Add your API endpoint mappings below:
-        // register(path: "/api/...", method: .get, mockFile: "mock_...")
+        register(path: "/api/nutrition/analyze", method: .post, mockFile: "mock_nutrition_biryani")
 
         #if DEBUG
         print("✅ [MockRegistry] \(registry.count) mappings registered")
