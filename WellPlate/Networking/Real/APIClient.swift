@@ -1,23 +1,13 @@
+//
+//  APIClient.swift
+//  WellPlate
+//
+//  Updated by Claude on 16.02.2026.
+//
+
 import Foundation
 
-enum HTTPMethod: String {
-    case get = "GET"
-    case post = "POST"
-    case put = "PUT"
-    case delete = "DELETE"
-    case patch = "PATCH"
-}
-
-enum APIError: Error {
-    case invalidURL
-    case invalidResponse
-    case noData
-    case decodingError(Error)
-    case serverError(statusCode: Int, message: String?)
-    case networkError(Error)
-}
-
-class APIClient {
+class APIClient: APIClientProtocol {
     static let shared = APIClient()
 
     private let session: URLSession
@@ -76,6 +66,22 @@ class APIClient {
         }
     }
 
+    func requestVoid(
+        url: URL,
+        method: HTTPMethod,
+        headers: [String: String]? = nil,
+        body: Data? = nil
+    ) async throws {
+        // For void responses, we make the request but don't decode a response
+        let _: EmptyResponse = try await request(
+            url: url,
+            method: method,
+            headers: headers,
+            body: body,
+            responseType: EmptyResponse.self
+        )
+    }
+
     // MARK: - Convenience Methods
 
     func get<T: Decodable>(
@@ -110,6 +116,32 @@ class APIClient {
         responseType: T.Type
     ) async throws -> T {
         try await request(url: url, method: .delete, headers: headers, responseType: responseType)
+    }
+
+    func patch<T: Decodable>(
+        url: URL,
+        headers: [String: String]? = nil,
+        body: Data? = nil,
+        responseType: T.Type
+    ) async throws -> T {
+        try await request(url: url, method: .patch, headers: headers, body: body, responseType: responseType)
+    }
+
+    // MARK: - Void Variants
+
+    func deleteVoid(
+        url: URL,
+        headers: [String: String]? = nil
+    ) async throws {
+        try await requestVoid(url: url, method: .delete, headers: headers, body: nil)
+    }
+
+    func putVoid(
+        url: URL,
+        headers: [String: String]? = nil,
+        body: Data? = nil
+    ) async throws {
+        try await requestVoid(url: url, method: .put, headers: headers, body: body)
     }
 
     // MARK: - Helper Methods
