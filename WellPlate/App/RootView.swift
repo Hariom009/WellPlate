@@ -10,6 +10,7 @@ import SwiftUI
 
 struct RootView: View {
     @State private var showSplash = false
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         ZStack {
@@ -24,7 +25,7 @@ struct RootView: View {
                         }
                     }
             } else {
-                HomeView()
+                HomeView(viewModel: HomeViewModel(modelContext: modelContext))
                     .transition(.opacity)
             }
         }

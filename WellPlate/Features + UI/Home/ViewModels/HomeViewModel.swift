@@ -1,148 +1,137 @@
-//
-//  HomeViewModel.swift
-//  WellPlate
-//
-//  Created by Claude on 16.02.2026.
-//
-
 import Foundation
+import SwiftData
 import Combine
 
-/// ViewModel for HomeView
-/// Handles business logic for food nutrition analysis
 @MainActor
-class HomeViewModel: ObservableObject {
-    // MARK: - Published Properties
-
-    /// User input: food description
+final class HomeViewModel: ObservableObject {
     @Published var foodDescription: String = ""
-
-    /// User input: serving size (optional)
     @Published var servingSize: String = ""
-
-    /// Analysis result
     @Published var nutritionalInfo: NutritionalInfo?
-
-    /// Loading state
     @Published var isLoading: Bool = false
-
-    /// Error state
     @Published var showError: Bool = false
-
-    /// Error message
     @Published var errorMessage: String = ""
 
-    // MARK: - Dependencies
-
     private let nutritionService: NutritionServiceProtocol
+    private let modelContext: ModelContext
 
-    // MARK: - Computed Properties
-
-    /// Whether the analyze button should be enabled
-    var isAnalyzeButtonEnabled: Bool {
-        !foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoading
-    }
-
-    // MARK: - Initialization
-
-    /// Initialize with dependency injection
-    /// - Parameter nutritionService: The nutrition service to use
-    init(nutritionService: NutritionServiceProtocol = NutritionService()) {
+    init(modelContext: ModelContext,
+         nutritionService: NutritionServiceProtocol = NutritionService()) {
+        self.modelContext = modelContext
         self.nutritionService = nutritionService
     }
 
-    // MARK: - Actions
+    func logFood(on date: Date) async {
+        let trimmed = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { showErrorMessage("Please enter a food description"); return }
 
-    /// Analyze the entered food
-    func analyzeFood() async {
-        // Validate input
-        let trimmedDescription = foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDescription.isEmpty else {
-            showErrorMessage("Please enter a food description")
-            return
-        }
-
-        // Start loading
         isLoading = true
-        errorMessage = ""
-        showError = false
+        defer { isLoading = false }
+
+        let day = Calendar.current.startOfDay(for: date)
+        let key = normalizeFoodKey(trimmed)
 
         do {
-            // Create request
+            // 1) cache lookup
+            if let cached = try fetchCache(key: key) {
+                insertLog(from: cached, day: day, typedName: trimmed, key: key)
+                nutritionalInfo = NutritionalInfo(
+                    foodName: cached.displayName,
+                    servingSize: cached.servingSize,
+                    calories: cached.calories,
+                    protein: cached.protein,
+                    carbs: cached.carbs,
+                    fat: cached.fat,
+                    fiber: cached.fiber,
+                    confidence: cached.confidence
+                )
+                try modelContext.save()
+                return
+            }
+
+            // 2) API call
             let request = NutritionAnalysisRequest(
-                foodDescription: trimmedDescription,
+                foodDescription: trimmed,
                 servingSize: servingSize.isEmpty ? nil : servingSize
             )
-
-            // Call service
             let result = try await nutritionService.analyzeFood(request: request)
-
-            // Update UI on success
             nutritionalInfo = result
-            isLoading = false
 
-            #if DEBUG
-            print("✅ [HomeViewModel] Successfully analyzed: \(result.foodName)")
-            #endif
+            // 3) upsert cache + insert log
+            try upsertCache(from: result, key: key, displayName: trimmed)
+            insertLog(from: result, day: day, typedName: trimmed, key: key)
 
-        } catch let error as APIError {
-            // Handle API errors
-            handleError(error)
+            try modelContext.save()
         } catch {
-            // Handle unexpected errors
-            showErrorMessage("An unexpected error occurred. Please try again.")
-            #if DEBUG
-            print("❌ [HomeViewModel] Unexpected error: \(error)")
-            #endif
+            showErrorMessage("Failed to log food. Please try again.")
         }
     }
 
-    /// Clear results and reset form
-    func clearResults() {
-        nutritionalInfo = nil
-        foodDescription = ""
-        servingSize = ""
-        errorMessage = ""
-        showError = false
+    private func fetchCache(key: String) throws -> FoodCache? {
+        let fd = FetchDescriptor<FoodCache>(predicate: #Predicate { $0.key == key })
+        return try modelContext.fetch(fd).first
     }
 
-    // MARK: - Error Handling
-
-    private func handleError(_ error: APIError) {
-        isLoading = false
-
-        let message: String
-        switch error {
-        case .networkError(let underlyingError):
-            message = "Network error. Please check your connection."
-            #if DEBUG
-            print("❌ [HomeViewModel] Network error: \(underlyingError)")
-            #endif
-        case .invalidURL:
-            message = "Invalid request. Please try again."
-        case .invalidResponse:
-            message = "Invalid response from server. Please try again."
-        case .noData:
-            message = "No data received. Please try again."
-        case .decodingError(let underlyingError):
-            message = "Failed to process response. Please try again."
-            #if DEBUG
-            print("❌ [HomeViewModel] Decoding error: \(underlyingError)")
-            #endif
-        case .serverError(let statusCode, let msg):
-            message = msg ?? "Server error (\(statusCode)). Please try again."
+    private func upsertCache(from info: NutritionalInfo, key: String, displayName: String) throws {
+        if let existing = try fetchCache(key: key) {
+            existing.displayName = displayName
+            existing.servingSize = info.servingSize
+            existing.calories = info.calories
+            existing.protein = info.protein
+            existing.carbs = info.carbs
+            existing.fat = info.fat
+            existing.fiber = info.fiber
+            existing.confidence = info.confidence
+            existing.updatedAt = .now
+        } else {
+            let cache = FoodCache(
+                key: key,
+                displayName: displayName,
+                servingSize: info.servingSize,
+                calories: info.calories,
+                protein: info.protein,
+                carbs: info.carbs,
+                fat: info.fat,
+                fiber: info.fiber,
+                confidence: info.confidence
+            )
+            modelContext.insert(cache)
         }
+    }
 
-        showErrorMessage(message)
+    private func insertLog(from cache: FoodCache, day: Date, typedName: String, key: String) {
+        let entry = FoodLogEntry(
+            day: day,
+            foodName: typedName,
+            key: key,
+            servingSize: cache.servingSize,
+            calories: cache.calories,
+            protein: cache.protein,
+            carbs: cache.carbs,
+            fat: cache.fat,
+            fiber: cache.fiber,
+            confidence: cache.confidence
+        )
+        modelContext.insert(entry)
+    }
+
+    private func insertLog(from info: NutritionalInfo, day: Date, typedName: String, key: String) {
+        let entry = FoodLogEntry(
+            day: day,
+            foodName: typedName,
+            key: key,
+            servingSize: info.servingSize,
+            calories: info.calories,
+            protein: info.protein,
+            carbs: info.carbs,
+            fat: info.fat,
+            fiber: info.fiber,
+            confidence: info.confidence
+        )
+        modelContext.insert(entry)
     }
 
     private func showErrorMessage(_ message: String) {
         errorMessage = message
         showError = true
-        isLoading = false
-
-        #if DEBUG
-        print("⚠️  [HomeViewModel] Error: \(message)")
-        #endif
     }
 }

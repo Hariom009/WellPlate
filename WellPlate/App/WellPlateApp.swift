@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct WellPlateApp: App {
@@ -25,10 +26,13 @@ struct WellPlateApp: App {
         #endif
     }
 
+
     var body: some Scene {
         WindowGroup {
             RootView()
         }
+        .modelContainer(for: [FoodCache.self, FoodLogEntry.self])
+
     }
 
     #if DEBUG

@@ -1,49 +1,113 @@
-//
-//  HomeView.swift
-//  WellPlate
-//
-//  Created by Claude on 16.02.2026.
-//  Updated by Claude on 17.02.2026.
-//
-
 import SwiftUI
+import SwiftData
 
 struct HomeView: View {
-    @StateObject private var viewModel = HomeViewModel()
+    @Environment(\.modelContext) private var modelContext
+    @StateObject private var viewModel: HomeViewModel
+
     @State private var selectedDate = Date()
     @State private var showDatePicker = false
     @State private var showProfile = false
     @State private var isGoalsExpanded = false
     @FocusState private var isTextEditorFocused: Bool
+    @State private var scrollOffset: CGFloat = 0
+
+    @Query private var foodLogs: [FoodLogEntry]
+
+    init(viewModel: HomeViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+
+        let sixtyDaysAgo = Calendar.current.date(byAdding: .day, value: -60, to: Date()) ?? Date()
+        let predicate = #Predicate<FoodLogEntry> { entry in
+            entry.day >= sixtyDaysAgo
+        }
+        _foodLogs = Query(filter: predicate, sort: \.createdAt, order: .reverse)
+    }
+
+    private var aggregatedNutrition: NutritionalInfo? {
+        let targetDay = Calendar.current.startOfDay(for: selectedDate)
+
+        let filteredLogs = foodLogs.filter { $0.day == targetDay }
+        guard !filteredLogs.isEmpty else { return nil }
+
+        let totalCalories = min(
+            filteredLogs.reduce(0) { $0 + $1.calories },
+            999999
+        )
+        let totalProtein = filteredLogs.reduce(0.0) { $0 + $1.protein }
+        let totalCarbs = filteredLogs.reduce(0.0) { $0 + $1.carbs }
+        let totalFat = filteredLogs.reduce(0.0) { $0 + $1.fat }
+        let totalFiber = filteredLogs.reduce(0.0) { $0 + $1.fiber }
+
+        return NutritionalInfo(
+            foodName: "\(filteredLogs.count) item\(filteredLogs.count == 1 ? "" : "s")",
+            servingSize: nil,
+            calories: totalCalories,
+            protein: totalProtein,
+            carbs: totalCarbs,
+            fat: totalFat,
+            fiber: totalFiber,
+            confidence: nil
+        )
+    }
+
+    private var foodLogsForSelectedDate: [FoodLogEntry] {
+        let targetDay = Calendar.current.startOfDay(for: selectedDate)
+        return foodLogs.filter { $0.day == targetDay }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func deleteFoodEntry(_ entry: FoodLogEntry) {
+        withAnimation {
+            modelContext.delete(entry)
+            do {
+                try modelContext.save()
+            } catch {
+                print("Error deleting food entry: \(error)")
+            }
+        }
+    }
+
+    private func addAgain(_ entry: FoodLogEntry) {
+        // Set the food description to the entry's name and trigger analysis
+        viewModel.foodDescription = entry.foodName
+
+        Task {
+            await viewModel.logFood(on: selectedDate)
+            // Clear input after successful log
+            await MainActor.run {
+                viewModel.foodDescription = ""
+            }
+        }
+    }
 
     var body: some View {
         ZStack {
             Color(.white)
                 .ignoresSafeArea()
-            
+
             VStack(spacing: 0) {
-                // Top Navigation Bar
                 topNavigationBar
-                
-                // Text Editor Mode - Always visible like a notebook
                 textEditorView
-                
                 Spacer()
             }
             
-            // Expandable Goals View - Always visible at bottom
-            // This gets updated when analysis completes
-            VStack {
-                Spacer()
-                GoalsExpandableView(
-                    isExpanded: $isGoalsExpanded,
-                    currentNutrition: viewModel.nutritionalInfo,
-                    dailyGoals: .default
-                )
-                .onTapGesture {
-                    if !isGoalsExpanded {
-                        isGoalsExpanded = true
+            // Hide GoalExpandableView when keyboard is visible
+            if !isTextEditorFocused {
+                VStack {
+                    Spacer()
+                    Spacer()
+                    GoalsExpandableView(
+                        isExpanded: $isGoalsExpanded,
+                        currentNutrition: aggregatedNutrition,
+                        dailyGoals: .default
+                    )
+                    .onTapGesture {
+                        if !isGoalsExpanded {
+                            isGoalsExpanded = true
+                        }
                     }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
         }
@@ -55,9 +119,8 @@ struct HomeView: View {
         .sheet(isPresented: $showDatePicker) {
             datePickerSheet
         }
-        .onChange(of: viewModel.nutritionalInfo) { oldValue, newValue in
-            // Auto-expand goals view when new nutritional info is available
-            if newValue != nil && oldValue == nil {
+        .onChange(of: foodLogs.count) { oldValue, newValue in
+            if aggregatedNutrition != nil && oldValue == 0 {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     isGoalsExpanded = true
                 }
@@ -65,12 +128,9 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Top Navigation Bar
-
     private var topNavigationBar: some View {
         ZStack{
             HStack{
-                // Left - Logo Space (placeholder for now)
                 Circle()
                     .fill(Color.orange.opacity(0.15))
                     .frame(width: 44, height: 44)
@@ -82,12 +142,8 @@ struct HomeView: View {
                 
                 Spacer()
                 
-                // Right - Streak and Profile
                 HStack(spacing: 12){
-                    // Streak Button
-                    Button(action: {
-                        // Streak action
-                    }) {
+                    Button(action: {}) {
                         HStack(spacing:4){
                             Image(systemName: "flame.fill")
                                 .font(.system(size: 14))
@@ -99,7 +155,6 @@ struct HomeView: View {
                         }
                     }
                     HStack{
-                        // Profile Button
                         Button(action: {
                             showProfile = true
                         }) {
@@ -118,7 +173,6 @@ struct HomeView: View {
                 )
             }
             
-            // Center - Date Selector
             Button(action: {
                 showDatePicker = true
             }) {
@@ -142,48 +196,68 @@ struct HomeView: View {
         .background(Color(.systemGroupedBackground))
     }
     
-    // MARK: - Text Editor View (Notebook Style)
-    
     private var textEditorView: some View {
         ZStack(alignment: .topLeading) {
-            // Background that's tappable
             Color(.white)
-            
+
             VStack(spacing: 0) {
-                // Text Editor - takes full height, always visible
-                ZStack(alignment: .topLeading) {
-                    // Placeholder text
-                    if viewModel.foodDescription.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Start logging your meals...")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray.opacity(0.5))
-                                .padding(.horizontal, 20)
-                                .padding(.top, 24)
+                // Use List for swipe-to-delete functionality
+                List {
+                    // Display logged food items with energy
+                    ForEach(foodLogsForSelectedDate) { entry in
+                        HStack {
+                            Text(entry.foodName)
+                                .font(.r(14, .regular))
+                                .foregroundColor(.primary)
+
+                            Spacer()
+
+                            Text("\(entry.calories) kcal")
+                                .font(.r(14, .regular))
+                                .foregroundColor(.gray)
                         }
-                        .allowsHitTesting(false)
+                        .listRowInsets(EdgeInsets(top: 1, leading: 24, bottom: 1, trailing: 24))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                deleteFoodEntry(entry)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .contextMenu {
+                            Button {
+                                addAgain(entry)
+                            } label: {
+                                Label("Add Again", systemImage: "plus.circle.fill")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                deleteFoodEntry(entry)
+                            } label: {
+                                Label("Delete", systemImage: "trash.fill")
+                            }
+                        }
                     }
-                    
-                    // The actual text editor with inline analyze button
+
+                    // Input field for new entry embedded in List
                     HStack(alignment: .top, spacing: 12) {
-                        TextEditor(text: $viewModel.foodDescription)
-                            .font(.body)
-                            .scrollContentBackground(.hidden)
-                            .background(Color.clear)
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
+                        TextField("Add food...", text: $viewModel.foodDescription)
+                            .font(.r(14, .regular))
+                            .textFieldStyle(.plain)
                             .focused($isTextEditorFocused)
                             .disabled(viewModel.isLoading)
                             .tint(.orange)
+                            .submitLabel(.return)
                             .onSubmit {
-                                // Trigger analysis when Enter/Return is pressed
                                 if !viewModel.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                     triggerAnalysis()
                                 }
                             }
-                            .submitLabel(.done)
-                        
-                        // Inline Analyze Button - appears when there's text
+
                         if !viewModel.foodDescription.isEmpty {
                             Button(action: {
                                 triggerAnalysis()
@@ -212,37 +286,61 @@ struct HomeView: View {
                                 )
                                 .shadow(color: .orange.opacity(0.3), radius: 8, x: 0, y: 4)
                             }
+                            .buttonStyle(.plain)
                             .disabled(viewModel.isLoading)
-                            .padding(.trailing, 16)
-                            .padding(.top, 16)
                             .transition(.scale.combined(with: .opacity))
                         }
                     }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 24, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                    // Placeholder when no foods logged
+                    if foodLogsForSelectedDate.isEmpty && viewModel.foodDescription.isEmpty {
+                        Text("Start logging your meals...")
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray.opacity(0.5))
+                            .listRowInsets(EdgeInsets(top: 16, leading: 24, bottom: 16, trailing: 24))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
                 }
+                .listStyle(.plain)
+                .listRowSpacing(0)
+                .scrollContentBackground(.hidden)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            // Detect pull-down at top to dismiss keyboard
+                            // When at top and pulling down (positive translation)
+                            if value.translation.height > 100 && isTextEditorFocused {
+                                isTextEditorFocused = false
+                            }
+                        }
+                )
             }
         }
         .onAppear {
-            // Auto-focus when view appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 isTextEditorFocused = true
             }
         }
     }
     
-    // MARK: - Helper Functions
-    
     private func triggerAnalysis() {
         isTextEditorFocused = false
-        // Remove the last newline if it exists (from pressing Enter)
-        if viewModel.foodDescription.hasSuffix("\n") {
-            viewModel.foodDescription.removeLast()
-        }
+
+        let foodInput = viewModel.foodDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !foodInput.isEmpty else { return }
+
         Task {
-            await viewModel.analyzeFood()
+            await viewModel.logFood(on: selectedDate)
+            // Clear input after successful log
+            await MainActor.run {
+                viewModel.foodDescription = ""
+            }
         }
     }
-    
-    // MARK: - Date Picker Sheet
     
     private var datePickerSheet: some View {
         NavigationView {
@@ -293,12 +391,9 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Results Section
-
     private var resultsSection: some View {
         VStack(spacing: 20) {
             if let info = viewModel.nutritionalInfo {
-                // Food Name & Serving
                 VStack(spacing: 8) {
                     Text(info.foodName)
                         .font(.title2)
@@ -328,7 +423,6 @@ struct HomeView: View {
                         .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
                 )
 
-                // Nutrition Grid
                 nutritionGrid(info: info)
             }
         }
@@ -336,7 +430,6 @@ struct HomeView: View {
 
     private func nutritionGrid(info: NutritionalInfo) -> some View {
         VStack(spacing: 16) {
-            // Main Macros
             HStack(spacing: 12) {
                 nutritionCard(
                     icon: "flame.fill",
@@ -373,7 +466,6 @@ struct HomeView: View {
                 )
             }
             
-            // Fiber as full width
             nutritionCardFullWidth(
                 icon: "chevron.up.chevron.down",
                 color: .green,
@@ -454,12 +546,8 @@ struct HomeView: View {
         )
     }
 
-    // MARK: - Clear Button
-
     private var clearButton: some View {
         Button(action: {
-            viewModel.clearResults()
-            // Re-focus the text editor after clearing
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 isTextEditorFocused = true
             }
@@ -486,8 +574,4 @@ struct HomeView: View {
             .shadow(color: .blue.opacity(0.3), radius: 10, x: 0, y: 5)
         }
     }
-}
-
-#Preview {
-    HomeView()
 }

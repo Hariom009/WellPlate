@@ -1,4 +1,6 @@
 import Foundation
+import SwiftUI
+import SwiftData
 
 struct NutritionalInfo: Codable, Identifiable,Equatable {
     let id: UUID

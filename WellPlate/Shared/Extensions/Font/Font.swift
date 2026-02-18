@@ -10,7 +10,7 @@ extension Font {
     }
 
     /// SF Pro Rounded with explicit size (use when you really need fixed sizing).
-    static func r(_ size: CGFloat, _ weight: Weight = .regular) -> Font {
+    static func r(_ size: CGFloat, _ weight: Weight) -> Font {
         .system(size: size, weight: weight, design: .rounded)
     }
 

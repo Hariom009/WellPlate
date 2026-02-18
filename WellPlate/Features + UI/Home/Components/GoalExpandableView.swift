@@ -1,4 +1,4 @@
-//
+c//
 //  GoalsExpandableView.swift
 //  WellPlate
 //
@@ -40,7 +40,7 @@ struct GoalsExpandableView: View {
         Button(action: {
             isExpanded = true
         }) {
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 // Calories
                 nutritionPill(
                     icon: "🔥",
@@ -96,10 +96,10 @@ struct GoalsExpandableView: View {
     private func nutritionPill(icon: String, value: Int, label: String) -> some View {
         HStack(spacing: 4) {
             Text(icon)
-                .font(.system(size: 14))
+                .font(.r(14, .regular))
             
             Text("\(value)")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.r(14, .semibold))
                 .foregroundColor(.primary)
         }
     }
