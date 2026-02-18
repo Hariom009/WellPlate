@@ -11,6 +11,7 @@ struct HomeView: View {
     @State private var isGoalsExpanded = false
     @FocusState private var isTextEditorFocused: Bool
     @State private var scrollOffset: CGFloat = 0
+    @State private var dragOffset: CGFloat = 0
 
     @Query private var foodLogs: [FoodLogEntry]
 
@@ -68,6 +69,14 @@ struct HomeView: View {
         }
     }
 
+    private func changeDate(by days: Int) {
+        if let newDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedDate = newDate
+            }
+        }
+    }
+
     private func addAgain(_ entry: FoodLogEntry) {
         // Set the food description to the entry's name and trigger analysis
         viewModel.foodDescription = entry.foodName
@@ -91,7 +100,7 @@ struct HomeView: View {
                 textEditorView
                 Spacer()
             }
-            
+
             // Hide GoalExpandableView when keyboard is visible
             if !isTextEditorFocused {
                 VStack {
@@ -111,6 +120,28 @@ struct HomeView: View {
                 }
             }
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10)
+                .onEnded { value in
+                    // Detect horizontal swipes
+                    let horizontalAmount = abs(value.translation.width)
+                    let verticalAmount = abs(value.translation.height)
+
+                    // Must be primarily horizontal (1.8x more horizontal than vertical)
+                    // and swipe at least 70 points
+                    let isHorizontalSwipe = horizontalAmount > verticalAmount * 1.8 && horizontalAmount > 70
+
+                    if isHorizontalSwipe && !isGoalsExpanded {
+                        if value.translation.width > 0 {
+                            // Swipe right - go to previous day
+                            changeDate(by: -1)
+                        } else {
+                            // Swipe left - go to next day
+                            changeDate(by: 1)
+                        }
+                    }
+                }
+        )
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -309,11 +340,12 @@ struct HomeView: View {
                 .listRowSpacing(0)
                 .scrollContentBackground(.hidden)
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
+                    DragGesture(minimumDistance: 10)
                         .onChanged { value in
                             // Detect pull-down at top to dismiss keyboard
-                            // When at top and pulling down (positive translation)
-                            if value.translation.height > 100 && isTextEditorFocused {
+                            // Only trigger for vertical drags (not horizontal swipes)
+                            let isVerticalDrag = abs(value.translation.height) > abs(value.translation.width)
+                            if isVerticalDrag && value.translation.height > 100 && isTextEditorFocused {
                                 isTextEditorFocused = false
                             }
                         }
