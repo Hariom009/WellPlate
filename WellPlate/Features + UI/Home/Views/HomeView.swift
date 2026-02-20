@@ -93,7 +93,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            Color(.white)
+            Color(.systemBackground)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -177,21 +177,8 @@ struct HomeView: View {
                 
                 Spacer()
                 
-                HStack(spacing: 12){
-                    Button(action: {
-                        showProgressInsights = true
-                    }) {
-                        HStack(spacing:4){
-                            Image(systemName: "chart.line.uptrend.xyaxis")
-                                .font(.system(size: 14))
-                                .foregroundColor(.orange)
-
-                            Text("Stats")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.primary)
-                        }
-                    }
-
+                HStack(spacing: 14){
+                   
                     Button(action: {}) {
                         HStack(spacing:4){
                             Image(systemName: "flame.fill")
@@ -203,13 +190,23 @@ struct HomeView: View {
                                 .foregroundColor(.primary)
                         }
                     }
+                    Button(action: {
+                        showProgressInsights = true
+                    }) {
+                        HStack(spacing:4){
+                            Image(systemName: "chart.bar.xaxis")
+                                .font(.system(size: 16))
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    
                     HStack{
                         Button(action: {
                             showProfile = true
                         }) {
                             Image(systemName: "gearshape.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(.black.opacity(0.9))
+                                .font(.system(size: 16))
+                                .foregroundColor(.primary)
                         }
                     }
                 }
@@ -218,7 +215,7 @@ struct HomeView: View {
                 .background(
                     RoundedRectangle(cornerRadius: 16)
                         .fill(Color(.systemBackground))
-                        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                        .appShadow(radius: 8, y: 2)
                 )
             }
             
@@ -235,7 +232,7 @@ struct HomeView: View {
                 .background(
                     RoundedRectangle(cornerRadius: 18)
                         .fill(Color(.systemBackground))
-                        .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+                        .appShadow(radius: 8, y: 2)
                 )
             }
             
@@ -247,7 +244,7 @@ struct HomeView: View {
     
     private var textEditorView: some View {
         ZStack(alignment: .topLeading) {
-            Color(.white)
+            Color(.systemBackground)
 
             VStack(spacing: 0) {
                 // Use List for swipe-to-delete functionality
@@ -470,7 +467,7 @@ struct HomeView: View {
                 .background(
                     RoundedRectangle(cornerRadius: 16)
                         .fill(Color(.systemBackground))
-                        .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
+                        .appShadow(radius: 10, y: 4)
                 )
 
                 nutritionGrid(info: info)
@@ -558,7 +555,7 @@ struct HomeView: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
+                .appShadow(radius: 10, y: 4)
         )
     }
     
@@ -592,7 +589,7 @@ struct HomeView: View {
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 4)
+                .appShadow(radius: 10, y: 4)
         )
     }
 
@@ -624,4 +621,19 @@ struct HomeView: View {
             .shadow(color: .blue.opacity(0.3), radius: 10, x: 0, y: 5)
         }
     }
+}
+
+#Preview("Light") {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try! ModelContainer(for: FoodLogEntry.self, configurations: config)
+    return HomeView(viewModel: HomeViewModel(modelContext: container.mainContext))
+        .modelContainer(container)
+}
+
+#Preview("Dark") {
+    let config = ModelConfiguration(isStoredInMemoryOnly: true)
+    let container = try! ModelContainer(for: FoodLogEntry.self, configurations: config)
+    return HomeView(viewModel: HomeViewModel(modelContext: container.mainContext))
+        .modelContainer(container)
+        .preferredColorScheme(.dark)
 }

@@ -86,13 +86,13 @@ struct GoalsExpandableView: View {
             .background(
                 RoundedRectangle(cornerRadius: 24)
                     .fill(Color(.systemBackground))
-                    .shadow(color: .black.opacity(0.1), radius: 20, x: 0, y: -5)
+                    .appShadow(radius: 20, y: -5)
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
     }
-    
+
     private func nutritionPill(icon: String, value: Int, label: String) -> some View {
         HStack(spacing: 4) {
             Text(icon)
@@ -217,7 +217,7 @@ struct GoalsExpandableView: View {
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(.systemBackground))
-                    .shadow(color: .black.opacity(0.1), radius: 15, x: 0, y: -5)
+                    .appShadow(radius: 15, y: -5)
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -354,7 +354,7 @@ struct DailyGoals {
 #Preview("Expanded") {
     VStack {
         Spacer()
-        
+
         GoalsExpandableView(
             isExpanded: .constant(true),
             currentNutrition: NutritionalInfo(
@@ -371,4 +371,50 @@ struct DailyGoals {
         )
     }
     .background(Color(.systemGroupedBackground))
+}
+
+#Preview("Dark — Collapsed") {
+    VStack {
+        Spacer()
+
+        GoalsExpandableView(
+            isExpanded: .constant(false),
+            currentNutrition: NutritionalInfo(
+                foodName: "Grilled Chicken Salad",
+                servingSize: "1 bowl",
+                calories: 450,
+                protein: 45.0,
+                carbs: 30.0,
+                fat: 15.0,
+                fiber: 8.0,
+                confidence: 0.95
+            ),
+            dailyGoals: .default
+        )
+    }
+    .background(Color(.systemGroupedBackground))
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Dark — Expanded") {
+    VStack {
+        Spacer()
+
+        GoalsExpandableView(
+            isExpanded: .constant(true),
+            currentNutrition: NutritionalInfo(
+                foodName: "Grilled Chicken Salad",
+                servingSize: "1 bowl",
+                calories: 450,
+                protein: 45.0,
+                carbs: 30.0,
+                fat: 15.0,
+                fiber: 8.0,
+                confidence: 0.95
+            ),
+            dailyGoals: .default
+        )
+    }
+    .background(Color(.systemGroupedBackground))
+    .preferredColorScheme(.dark)
 }

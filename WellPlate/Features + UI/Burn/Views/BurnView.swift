@@ -282,7 +282,7 @@ struct BurnView: View {
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 20)
             .fill(Color(.systemBackground))
-            .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
+            .appShadow(radius: 15, y: 5)
     }
 
     private var stepsFormatted: String {
@@ -293,6 +293,11 @@ struct BurnView: View {
     }
 }
 
-#Preview {
+#Preview("Light") {
     BurnView()
+}
+
+#Preview("Dark") {
+    BurnView()
+        .preferredColorScheme(.dark)
 }

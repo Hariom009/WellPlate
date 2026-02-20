@@ -6,23 +6,15 @@ struct LoadingScreenView: View {
     
     var body: some View {
         ZStack {
-            // Gradient background
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color.white,
-                    Color(red: 1.0, green: 0.95, blue: 0.9)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color(.systemBackground)
+                .ignoresSafeArea()
             
             VStack(spacing: 20) {
                 // App name
                 HStack(spacing: 0) {
                     Text("Well")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundColor(Color(red: 0.2, green: 0.2, blue: 0.2))
+                        .foregroundColor(.primary)
                     
                     Text("Plate")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -60,6 +52,11 @@ struct LoadingScreenView: View {
     }
 }
 
-#Preview {
+#Preview("Light") {
     LoadingScreenView()
+}
+
+#Preview("Dark") {
+    LoadingScreenView()
+        .preferredColorScheme(.dark)
 }

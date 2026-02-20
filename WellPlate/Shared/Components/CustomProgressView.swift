@@ -6,7 +6,7 @@ struct CustomProgressView: View {
     
     var body: some View {
         ZStack {
-            Color.white
+            Color(.systemBackground)
                 .ignoresSafeArea()
             
             VStack(spacing: 50) {
@@ -39,10 +39,19 @@ struct CustomProgressView: View {
             for index in 0..<3 {
                 bounceStates[index] = true
             }
-            
+
             withAnimation(.easeOut(duration: 0.6)) {
                 showText = true
             }
         }
     }
+}
+
+#Preview("Light") {
+    CustomProgressView()
+}
+
+#Preview("Dark") {
+    CustomProgressView()
+        .preferredColorScheme(.dark)
 }

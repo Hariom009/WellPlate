@@ -33,5 +33,11 @@ extension View {
             .disabled(disabled)
             .opacity(disabled ? AppOpacity.disabled : 1.0)
     }
+
+    /// Adaptive shadow — dark in light mode, subtle white glow in dark mode.
+    /// Always pass `y` explicitly; use negative values for upward-projecting shadows.
+    func appShadow(radius: CGFloat, x: CGFloat = 0, y: CGFloat) -> some View {
+        self.shadow(color: Color(.label).opacity(0.08), radius: radius, x: x, y: y)
+    }
 }
 

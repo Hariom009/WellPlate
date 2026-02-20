@@ -58,7 +58,7 @@ struct BurnMetricCardView: View {
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(.systemBackground))
-                    .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 3)
+                    .appShadow(radius: 10, y: 3)
             )
         }
         .buttonStyle(.plain)

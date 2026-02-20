@@ -173,7 +173,7 @@ struct BurnDetailView: View {
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 20)
             .fill(Color(.systemBackground))
-            .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
+            .appShadow(radius: 15, y: 5)
     }
 
     private var emptyState: some View {
@@ -202,4 +202,19 @@ struct BurnDetailView: View {
         }
         return "\(Int(v))"
     }
+}
+
+#Preview("Light") {
+    BurnDetailView(
+        metric: .activeEnergy,
+        samples: []
+    )
+}
+
+#Preview("Dark") {
+    BurnDetailView(
+        metric: .activeEnergy,
+        samples: []
+    )
+    .preferredColorScheme(.dark)
 }
