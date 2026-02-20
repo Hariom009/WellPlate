@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var selectedDate = Date()
     @State private var showDatePicker = false
     @State private var showProfile = false
+    @State private var showProgressInsights = false
     @State private var isGoalsExpanded = false
     @FocusState private var isTextEditorFocused: Bool
     @State private var scrollOffset: CGFloat = 0
@@ -150,6 +151,9 @@ struct HomeView: View {
         .sheet(isPresented: $showDatePicker) {
             datePickerSheet
         }
+        .fullScreenCover(isPresented: $showProgressInsights) {
+            ProgressInsightsView()
+        }
         .onChange(of: foodLogs.count) { oldValue, newValue in
             if aggregatedNutrition != nil && oldValue == 0 {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
@@ -174,12 +178,26 @@ struct HomeView: View {
                 Spacer()
                 
                 HStack(spacing: 12){
+                    Button(action: {
+                        showProgressInsights = true
+                    }) {
+                        HStack(spacing:4){
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .font(.system(size: 14))
+                                .foregroundColor(.orange)
+
+                            Text("Stats")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+
                     Button(action: {}) {
                         HStack(spacing:4){
                             Image(systemName: "flame.fill")
                                 .font(.system(size: 14))
                                 .foregroundColor(.orange)
-                            
+
                             Text("1")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.primary)
