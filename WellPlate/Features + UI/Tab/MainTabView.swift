@@ -25,7 +25,7 @@ struct MainTabView: View {
                 }
 
             // MARK: - Sleep
-            SleepPlaceholderView()
+            SleepView()
                 .tabItem {
                     Label("Sleep", systemImage: "moon.zzz.fill")
                 }

@@ -2,9 +2,12 @@ import SwiftUI
 import Charts
 import SwiftData
 
+// MARK: - ProgressInsightsView
+
 struct ProgressInsightsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.colorScheme) private var colorScheme
 
     @Query private var allFoodLogs: [FoodLogEntry]
 
@@ -12,9 +15,12 @@ struct ProgressInsightsView: View {
     @State private var selectedMetric: NutritionMetric = .calories
     @State private var showShareSheet = false
     @State private var selectedDay: Date?
+    @State private var headerAppeared = false
+    @State private var cardsAppeared = false
+    @State private var scrollOffset: CGFloat = 0
+    @State private var safeTopInset: CGFloat = 0
 
     init() {
-        // Query last 90 days of data
         let ninetyDaysAgo = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
         let predicate = #Predicate<FoodLogEntry> { entry in
             entry.day >= ninetyDaysAgo
@@ -26,7 +32,6 @@ struct ProgressInsightsView: View {
 
     private var dailyAggregates: [DailyAggregate] {
         let grouped = Dictionary(grouping: allFoodLogs) { $0.day }
-
         return grouped.map { day, logs in
             DailyAggregate(
                 date: day,
@@ -48,9 +53,7 @@ struct ProgressInsightsView: View {
         return dailyAggregates.filter { $0.date >= cutoffDate }
     }
 
-    private var currentPeriodStats: PeriodStats {
-        calculateStats(for: filteredData)
-    }
+    private var currentPeriodStats: PeriodStats { calculateStats(for: filteredData) }
 
     private var previousPeriodStats: PeriodStats {
         let cutoffDate = Calendar.current.date(byAdding: selectedTimeRange.calendarComponent,
@@ -59,141 +62,331 @@ struct ProgressInsightsView: View {
         let endDate = Calendar.current.date(byAdding: selectedTimeRange.calendarComponent,
                                             value: -selectedTimeRange.rawValue,
                                             to: Date()) ?? Date()
+        return calculateStats(for: dailyAggregates.filter { $0.date >= cutoffDate && $0.date < endDate })
+    }
 
-        let previousData = dailyAggregates.filter { $0.date >= cutoffDate && $0.date < endDate }
-        return calculateStats(for: previousData)
+    // MARK: - Colors
+
+    private var bgGradient: LinearGradient {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [Color(hex: "0F0F1A"), Color(hex: "1A1A2E")]
+                : [Color(hex: "F5F5FF"), Color(hex: "EEF2FF")],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color(hex: "1C1C2E") : .white
+    }
+
+    private var cardShadowColor: Color {
+        colorScheme == .dark ? Color.black.opacity(0.4) : Color.black.opacity(0.07)
+    }
+
+    // MARK: - Scroll progress
+
+    private let heroHeight: CGFloat = 300
+    private var heroVisible: Bool { scrollOffset > -heroHeight }
+
+    /// 0 → hero fully visible, 1 → hero fully scrolled away.
+    private var scrollProgress: CGFloat {
+        let start: CGFloat = 80
+        let end: CGFloat   = 260
+        let offset = -scrollOffset
+        return min(max((offset - start) / (end - start), 0), 1)
     }
 
     // MARK: - Body
 
     var body: some View {
         NavigationView {
-            ZStack {
-                Color(.systemGroupedBackground)
-                    .ignoresSafeArea()
+            ZStack(alignment: .top) {
+                bgGradient.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Time Range Selector
-                        timeRangeSelector
+                GeometryReader { outerGeo in
+                    Color.clear
+                        .onAppear { safeTopInset = outerGeo.safeAreaInsets.top }
+                }
+                .frame(height: 0)
 
-                        // Main Chart
-                        mainChartCard
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(
+                                    key: ScrollOffsetKey.self,
+                                    value: geo.frame(in: .named("scrollArea")).minY
+                                )
+                        }
+                        .frame(height: 0)
 
-                        // Key Metrics Grid
-                        keyMetricsGrid
+                        heroHeader
+                            .padding(.bottom, 24)
+                            .frame(height: 380)
 
-                        // Macro Distribution
-                        macroDistributionCard
-
-                        // Trends & Insights
-                        trendsCard
-
-                        // Detailed Stats
-                        detailedStatsCard
+                        VStack(spacing: 20) {
+                            timeRangeSelector
+                            mainChartCard
+                            keyMetricsGrid
+                            macroDistributionCard
+                            trendsCard
+                            detailedStatsCard
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 32)
+                        .opacity(cardsAppeared ? 1 : 0)
+                        .offset(y: cardsAppeared ? 0 : 30)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.25), value: cardsAppeared)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
+                }
+                .ignoresSafeArea(edges: .top)
+                .coordinateSpace(name: "scrollArea")
+                .onPreferenceChange(ScrollOffsetKey.self) { value in
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        scrollOffset = value
+                    }
                 }
             }
-            .navigationTitle("Progress & Insights")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundColor(.gray.opacity(0.3))
-                    }
+            .navigationBarHidden(true)
+            .background(bgGradient.ignoresSafeArea())
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                    headerAppeared = true
                 }
-
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showShareSheet = true }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.orange)
-                    }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    cardsAppeared = true
                 }
             }
+        }
+        // ─── Status-bar + nav-bar overlay ────────────────────────────────────
+        // Sits OUTSIDE NavigationView so it renders above the system white fill.
+        .overlay(alignment: .top) {
+            VStack(spacing: 0) {
+
+                // ① Status-bar area — fully opaque orange when scrolled,
+                //    so it completely replaces the white system background.
+                Color(hex: "FF6B35")
+                    .opacity(scrollProgress)          // 0 → transparent, 1 → solid orange
+                    .frame(height: safeTopInset)
+                    .allowsHitTesting(false)
+
+                // ② Nav bar content row
+                HStack {
+                    Text("Progress & Insights")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundColor(
+                            colorScheme == .dark
+                                ? Color(hex: "FFDAC8")
+                                : Color(hex: "C0421A")
+                        )
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Button(action: { showShareSheet = true }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(Color(hex: "FF6B35"))
+                                .frame(width: 32, height: 32)
+                                .background(Color(hex: "FF6B35").opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(Color(hex: "FF6B35"))
+                                .frame(width: 32, height: 32)
+                                .background(Color(hex: "FF6B35").opacity(0.15))
+                                .clipShape(Circle())
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(
+                    Color(hex: "FF6B35")
+                        .opacity(scrollProgress)      // nav bar row matches status bar
+                )
+            }
+            .opacity(scrollProgress)
+            .ignoresSafeArea(edges: .top)
+        }
+        // ─── Force light status-bar icons while hero is visible, ─────────────
+        // dark (black) icons would clash with the white bg before scrolling.
+        // When scrolled the orange bg needs white icons too.
+        .preferredColorScheme(colorScheme)             // keep app scheme
+        // Use UIKit bridge to lock status-bar style to .lightContent
+        .background(StatusBarStyleModifier())
+    }
+
+    // MARK: - Hero Header
+
+    private var heroHeader: some View {
+        ZStack(alignment: .bottomLeading) {
+            LinearGradient(
+                colors: [Color(hex: "FF6B35"), Color(hex: "FF8C42"), Color(hex: "FFA500")],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea(edges: .top)
+
+            Circle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 220, height: 220)
+                .offset(x: 180, y: -40)
+                .blur(radius: 2)
+
+            Circle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 140, height: 140)
+                .offset(x: 260, y: 30)
+
+            GeometryReader { geo in
+                VStack(alignment: .leading, spacing: 6) {
+                    Spacer()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Progress")
+                                .font(.system(size: 34, weight: .black, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("& Insights")
+                                .font(.system(size: 34, weight: .black, design: .rounded))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+
+                        Spacer()
+
+                        HStack{
+                            Button(action: { dismiss() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 40, height: 40)
+                                    .background(Color.white.opacity(0.2))
+                                    .clipShape(Circle())
+                            }
+                        }
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Last \(selectedTimeRange.rawValue) days")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(.white.opacity(0.75))
+                    .padding(.top, 4)
+
+                    HStack(spacing: 8) {
+                        HeroBadge(value: "\(currentPeriodStats.totalMeals)", label: "meals")
+                        HeroBadge(value: "\(currentPeriodStats.consistencyScore)%", label: "consistent")
+                        HeroBadge(value: "\(currentPeriodStats.maxCalories)", label: "best day kcal")
+                    }
+                    .padding(.top, 10)
+                }
+                .padding(.top, geo.safeAreaInsets.top + 20)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 56)
+                .opacity(headerAppeared ? 1 : 0)
+                .offset(y: headerAppeared ? 0 : -20)
+                .animation(.spring(response: 0.6, dampingFraction: 0.75), value: headerAppeared)
+            }
+            .ignoresSafeArea(edges: .top)
         }
     }
 
     // MARK: - Time Range Selector
 
     private var timeRangeSelector: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 0) {
             ForEach(TimeRange.allCases, id: \.self) { range in
                 Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                         selectedTimeRange = range
                     }
                 }) {
                     Text(range.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(selectedTimeRange == range ? .white : .primary)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(selectedTimeRange == range ? .white : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
                         .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(selectedTimeRange == range ?
-                                     LinearGradient(colors: [.orange, .orange.opacity(0.8)],
-                                                  startPoint: .topLeading,
-                                                  endPoint: .bottomTrailing) :
-                                        LinearGradient(colors: [Color(.systemBackground)],
-                                                     startPoint: .top,
-                                                     endPoint: .bottom))
+                            ZStack {
+                                if selectedTimeRange == range {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [Color(hex: "FF6B35"), Color(hex: "FF8C42")],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .shadow(color: Color(hex: "FF6B35").opacity(0.4), radius: 6, y: 3)
+                                }
+                            }
                         )
                 }
             }
         }
         .padding(4)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 2)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(cardBackground)
+                .shadow(color: cardShadowColor, radius: 12, x: 0, y: 4)
         )
     }
 
     // MARK: - Main Chart Card
 
     private var mainChartCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(selectedMetric.displayName)
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(0.8)
 
-                    HStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Text("\(currentPeriodStats.average(for: selectedMetric), specifier: "%.0f")")
-                            .font(.system(size: 28, weight: .heavy))
-                            .foregroundColor(.orange)
-
-                        Text("avg/day")
-                            .font(.system(size: 14))
+                            .font(.system(size: 36, weight: .black, design: .rounded))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [selectedMetric.color, selectedMetric.color.opacity(0.7)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        Text(selectedMetric.unit)
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.secondary)
+                            .padding(.bottom, 4)
                     }
                 }
 
                 Spacer()
 
-                // Trend indicator
                 VStack(alignment: .trailing, spacing: 4) {
                     HStack(spacing: 4) {
                         Image(systemName: trendDirection.icon)
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                         Text("\(abs(trendPercentage), specifier: "%.1f")%")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                     }
                     .foregroundColor(trendDirection.color)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(trendDirection.color.opacity(0.13)))
 
-                    Text("vs last period")
-                        .font(.system(size: 11))
+                    Text("vs prev. period")
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
                 }
             }
 
-            // Metric Selector Pills
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(NutritionMetric.allCases, id: \.self) { metric in
@@ -202,115 +395,107 @@ struct ProgressInsightsView: View {
                                 selectedMetric = metric
                             }
                         }) {
-                            HStack(spacing: 6) {
-                                Text(metric.icon)
-                                    .font(.system(size: 12))
-                                Text(metric.shortName)
-                                    .font(.system(size: 12, weight: .semibold))
+                            HStack(spacing: 5) {
+                                Text(metric.icon).font(.system(size: 11))
+                                Text(metric.shortName).font(.system(size: 12, weight: .bold, design: .rounded))
                             }
-                            .foregroundColor(selectedMetric == metric ? .white : .primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .foregroundColor(selectedMetric == metric ? .white : .secondary)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 7)
                             .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(selectedMetric == metric ?
-                                         metric.color : Color.gray.opacity(0.1))
+                                Capsule()
+                                    .fill(selectedMetric == metric ? metric.color : Color.secondary.opacity(0.1))
                             )
+                            .shadow(color: selectedMetric == metric ? metric.color.opacity(0.35) : .clear,
+                                    radius: 6, y: 3)
                         }
                     }
                 }
+                .padding(.vertical, 2)
             }
 
-            // Chart
+            Rectangle()
+                .fill(Color.secondary.opacity(0.1))
+                .frame(height: 1)
+
             if filteredData.isEmpty {
                 emptyChartPlaceholder
             } else {
-                chart
-                    .frame(height: 220)
+                chart.frame(height: 210)
             }
         }
         .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
-        )
+        .glassCard(background: cardBackground, shadowColor: cardShadowColor)
     }
 
     private var chart: some View {
         Chart {
             ForEach(filteredData) { data in
-                LineMark(
-                    x: .value("Date", data.date, unit: .day),
-                    y: .value(selectedMetric.displayName, data.value(for: selectedMetric))
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [selectedMetric.color, selectedMetric.color.opacity(0.6)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .lineStyle(StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                .interpolationMethod(.catmullRom)
-
                 AreaMark(
                     x: .value("Date", data.date, unit: .day),
                     y: .value(selectedMetric.displayName, data.value(for: selectedMetric))
                 )
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [selectedMetric.color.opacity(0.3), selectedMetric.color.opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
+                        colors: [selectedMetric.color.opacity(0.35), selectedMetric.color.opacity(0.03)],
+                        startPoint: .top, endPoint: .bottom
                     )
                 )
                 .interpolationMethod(.catmullRom)
 
-                if let selectedDay = selectedDay, Calendar.current.isDate(data.date, inSameDayAs: selectedDay) {
-                    PointMark(
-                        x: .value("Date", data.date, unit: .day),
-                        y: .value(selectedMetric.displayName, data.value(for: selectedMetric))
-                    )
-                    .foregroundStyle(selectedMetric.color)
-                    .symbolSize(100)
+                LineMark(
+                    x: .value("Date", data.date, unit: .day),
+                    y: .value(selectedMetric.displayName, data.value(for: selectedMetric))
+                )
+                .foregroundStyle(selectedMetric.color)
+                .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .interpolationMethod(.catmullRom)
+
+                if let sel = selectedDay, Calendar.current.isDate(data.date, inSameDayAs: sel) {
+                    PointMark(x: .value("Date", data.date, unit: .day),
+                              y: .value(selectedMetric.displayName, data.value(for: selectedMetric)))
+                        .foregroundStyle(.white).symbolSize(80)
+                    PointMark(x: .value("Date", data.date, unit: .day),
+                              y: .value(selectedMetric.displayName, data.value(for: selectedMetric)))
+                        .foregroundStyle(selectedMetric.color).symbolSize(40)
                 }
             }
 
-            // Goal line
             if selectedMetric == .calories {
                 RuleMark(y: .value("Goal", DailyGoals.default.calories))
-                    .foregroundStyle(Color.green.opacity(0.5))
-                    .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
+                    .foregroundStyle(Color.green.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                     .annotation(position: .top, alignment: .trailing) {
                         Text("Goal")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundColor(.green)
-                            .padding(4)
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(4)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.green.opacity(0.12)))
                     }
             }
         }
         .chartXAxis {
             AxisMarks(values: .stride(by: selectedTimeRange.xAxisStride)) { value in
-                AxisGridLine()
-                AxisTick()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                    .foregroundStyle(Color.secondary.opacity(0.3))
                 if let date = value.as(Date.self) {
                     AxisValueLabel {
                         Text(date, format: selectedTimeRange.dateFormat)
-                            .font(.system(size: 10))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.secondary)
                     }
                 }
             }
         }
         .chartYAxis {
             AxisMarks(position: .leading) { value in
-                AxisGridLine()
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                    .foregroundStyle(Color.secondary.opacity(0.2))
                 AxisValueLabel {
-                    if let intValue = value.as(Int.self) {
-                        Text("\(intValue)")
-                            .font(.system(size: 10))
+                    if let v = value.as(Double.self) {
+                        Text(formatAxisValue(v))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.secondary)
                     }
                 }
             }
@@ -318,369 +503,264 @@ struct ProgressInsightsView: View {
         .chartXSelection(value: $selectedDay)
     }
 
+    private func formatAxisValue(_ v: Double) -> String {
+        v >= 1000 ? String(format: "%.0fk", v / 1000) : String(format: "%.0f", v)
+    }
+
     private var emptyChartPlaceholder: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
-                .font(.system(size: 48))
-                .foregroundColor(.gray.opacity(0.3))
-
-            Text("No data for this period")
-                .font(.system(size: 16, weight: .medium))
+        VStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.secondary.opacity(0.07)).frame(width: 80, height: 80)
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 36, weight: .light))
+                    .foregroundColor(.secondary.opacity(0.4))
+            }
+            Text("No data yet")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundColor(.secondary)
-
-            Text("Start logging meals to see insights")
+            Text("Start logging meals to see your progress")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary.opacity(0.7))
+                .multilineTextAlignment(.center)
         }
-        .frame(height: 220)
-        .frame(maxWidth: .infinity)
+        .frame(height: 210).frame(maxWidth: .infinity)
     }
 
     // MARK: - Key Metrics Grid
 
     private var keyMetricsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            metricCard(
-                title: "Total Intake",
-                value: "\(currentPeriodStats.totalCalories)",
-                unit: "kcal",
-                icon: "flame.fill",
-                color: .orange,
-                trend: calculateTrend(current: Double(currentPeriodStats.totalCalories),
-                                    previous: Double(previousPeriodStats.totalCalories))
-            )
-
-            metricCard(
-                title: "Avg Protein",
-                value: String(format: "%.0f", currentPeriodStats.avgProtein),
-                unit: "g/day",
-                icon: "figure.strengthtraining.traditional",
-                color: .red,
-                trend: calculateTrend(current: currentPeriodStats.avgProtein,
-                                    previous: previousPeriodStats.avgProtein)
-            )
-
-            metricCard(
-                title: "Meals Logged",
-                value: "\(currentPeriodStats.totalMeals)",
-                unit: "items",
-                icon: "fork.knife",
-                color: .blue,
-                trend: calculateTrend(current: Double(currentPeriodStats.totalMeals),
-                                    previous: Double(previousPeriodStats.totalMeals))
-            )
-
-            metricCard(
-                title: "Consistency",
-                value: "\(currentPeriodStats.consistencyScore)",
-                unit: "%",
-                icon: "checkmark.circle.fill",
-                color: .green,
-                trend: nil
-            )
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+            metricCard(title: "Total Intake",
+                       value: "\(currentPeriodStats.totalCalories)", unit: "kcal",
+                       icon: "flame.fill", color: Color(hex: "FF6B35"),
+                       trend: calculateTrend(current: Double(currentPeriodStats.totalCalories),
+                                             previous: Double(previousPeriodStats.totalCalories)))
+            metricCard(title: "Avg Protein",
+                       value: String(format: "%.0f", currentPeriodStats.avgProtein), unit: "g/day",
+                       icon: "figure.strengthtraining.traditional", color: Color(hex: "FF4B6E"),
+                       trend: calculateTrend(current: currentPeriodStats.avgProtein,
+                                             previous: previousPeriodStats.avgProtein))
+            metricCard(title: "Meals Logged",
+                       value: "\(currentPeriodStats.totalMeals)", unit: "items",
+                       icon: "fork.knife", color: Color(hex: "5E9FFF"),
+                       trend: calculateTrend(current: Double(currentPeriodStats.totalMeals),
+                                             previous: Double(previousPeriodStats.totalMeals)))
+            metricCard(title: "Consistency",
+                       value: "\(currentPeriodStats.consistencyScore)", unit: "%",
+                       icon: "checkmark.seal.fill", color: Color(hex: "34C759"), trend: nil)
         }
     }
 
     private func metricCard(title: String, value: String, unit: String,
-                           icon: String, color: Color, trend: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+                             icon: String, color: Color, trend: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundColor(color)
-
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(color.opacity(0.15)).frame(width: 38, height: 38)
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .semibold)).foregroundColor(color)
+                }
                 Spacer()
-
                 if let trend = trend {
-                    HStack(spacing: 2) {
+                    HStack(spacing: 3) {
                         Image(systemName: trend >= 0 ? "arrow.up.right" : "arrow.down.right")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 9, weight: .black))
                         Text("\(abs(trend), specifier: "%.0f")%")
                             .font(.system(size: 10, weight: .bold))
                     }
-                    .foregroundColor(trend >= 0 ? .green : .red)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
+                    .foregroundColor(trend >= 0 ? Color(hex: "34C759") : Color(hex: "FF4B6E"))
+                    .padding(.horizontal, 7).padding(.vertical, 4)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill((trend >= 0 ? Color.green : Color.red).opacity(0.1))
+                        Capsule()
+                            .fill((trend >= 0 ? Color(hex: "34C759") : Color(hex: "FF4B6E")).opacity(0.12))
                     )
                 }
             }
-
             VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.system(size: 26, weight: .black, design: .rounded))
                         .foregroundColor(.primary)
-
                     Text(unit)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
                 }
-
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                    .textCase(.uppercase).tracking(0.5)
             }
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 3)
-        )
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard(background: cardBackground, shadowColor: cardShadowColor)
     }
 
     // MARK: - Macro Distribution Card
 
     private var macroDistributionCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Macro Distribution")
-                .font(.system(size: 18, weight: .bold))
-
-            HStack(spacing: 20) {
-                // Pie chart representation
+        VStack(alignment: .leading, spacing: 18) {
+            SectionHeader(title: "Macro Balance", subtitle: "avg per day")
+            HStack(spacing: 24) {
                 ZStack {
-                    // Background circle
-                    Circle()
-                        .fill(Color.gray.opacity(0.1))
-                        .frame(width: 140, height: 140)
-
-                    // Macro segments
-                    MacroPieChart(
-                        protein: currentPeriodStats.avgProtein,
-                        carbs: currentPeriodStats.avgCarbs,
-                        fat: currentPeriodStats.avgFat
-                    )
-                    .frame(width: 140, height: 140)
-
-                    // Center label
+                    MacroDonutChart(protein: currentPeriodStats.avgProtein,
+                                    carbs: currentPeriodStats.avgCarbs,
+                                    fat: currentPeriodStats.avgFat)
+                        .frame(width: 130, height: 130)
                     VStack(spacing: 2) {
-                        Text("Macros")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                        Text("g/day")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary.opacity(0.7))
+                        let total = currentPeriodStats.avgProtein + currentPeriodStats.avgCarbs + currentPeriodStats.avgFat
+                        Text(String(format: "%.0f", total))
+                            .font(.system(size: 22, weight: .black, design: .rounded)).foregroundColor(.primary)
+                        Text("g total").font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
                     }
                 }
-
-                // Legend
-                VStack(alignment: .leading, spacing: 12) {
-                    macroLegendItem(
-                        color: .red,
-                        name: "Protein",
-                        value: currentPeriodStats.avgProtein,
-                        percentage: macroPercentage(.protein)
-                    )
-
-                    macroLegendItem(
-                        color: .blue,
-                        name: "Carbs",
-                        value: currentPeriodStats.avgCarbs,
-                        percentage: macroPercentage(.carbs)
-                    )
-
-                    macroLegendItem(
-                        color: .yellow,
-                        name: "Fat",
-                        value: currentPeriodStats.avgFat,
-                        percentage: macroPercentage(.fat)
-                    )
+                VStack(alignment: .leading, spacing: 14) {
+                    macroBar(color: Color(hex: "FF4B6E"), name: "Protein",
+                             value: currentPeriodStats.avgProtein, pct: macroPercentage(.protein))
+                    macroBar(color: Color(hex: "5E9FFF"), name: "Carbs",
+                             value: currentPeriodStats.avgCarbs, pct: macroPercentage(.carbs))
+                    macroBar(color: Color(hex: "FFD60A"), name: "Fat",
+                             value: currentPeriodStats.avgFat, pct: macroPercentage(.fat))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
-        )
+        .glassCard(background: cardBackground, shadowColor: cardShadowColor)
     }
 
-    private func macroLegendItem(color: Color, name: String, value: Double, percentage: Double) -> some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(color)
-                .frame(width: 16, height: 16)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary)
-
-                HStack(spacing: 6) {
-                    Text("\(value, specifier: "%.0f")g")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
-
-                    Text("•")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary.opacity(0.5))
-
-                    Text("\(percentage, specifier: "%.0f")%")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+    private func macroBar(color: Color, name: String, value: Double, pct: Double) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(name).font(.system(size: 12, weight: .semibold, design: .rounded)).foregroundColor(.primary)
+                Spacer()
+                Text(String(format: "%.0fg", value)).font(.system(size: 12, weight: .bold)).foregroundColor(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.15)).frame(height: 6)
+                    RoundedRectangle(cornerRadius: 4).fill(color)
+                        .frame(width: geo.size.width * (pct / 100), height: 6)
                 }
             }
-
-            Spacer()
+            .frame(height: 6)
         }
     }
 
     // MARK: - Trends Card
 
     private var trendsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Trends & Insights")
-                .font(.system(size: 18, weight: .bold))
-
-            VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
+            SectionHeader(title: "Smart Insights", subtitle: "based on your data")
+            VStack(spacing: 10) {
                 if currentPeriodStats.avgCalories > Double(DailyGoals.default.calories) {
-                    insightRow(
-                        icon: "exclamationmark.triangle.fill",
-                        color: .orange,
-                        title: "Above calorie goal",
-                        description: "Averaging \(Int(currentPeriodStats.avgCalories - Double(DailyGoals.default.calories))) kcal over target"
-                    )
+                    insightRow(icon: "exclamationmark.triangle.fill",
+                               gradientColors: [Color(hex: "FF6B35"), Color(hex: "FFA500")],
+                               title: "Above Calorie Goal",
+                               description: "\(Int(currentPeriodStats.avgCalories - Double(DailyGoals.default.calories))) kcal over your daily target on average")
                 } else {
-                    insightRow(
-                        icon: "checkmark.circle.fill",
-                        color: .green,
-                        title: "Within calorie goal",
-                        description: "Great job staying on track!"
-                    )
+                    insightRow(icon: "checkmark.circle.fill",
+                               gradientColors: [Color(hex: "34C759"), Color(hex: "30D158")],
+                               title: "Within Calorie Goal",
+                               description: "You're nailing it! Staying on track consistently.")
                 }
-
                 if currentPeriodStats.avgProtein >= 100 {
-                    insightRow(
-                        icon: "bolt.fill",
-                        color: .blue,
-                        title: "Excellent protein intake",
-                        description: "Averaging \(Int(currentPeriodStats.avgProtein))g per day"
-                    )
+                    insightRow(icon: "bolt.fill",
+                               gradientColors: [Color(hex: "5E9FFF"), Color(hex: "007AFF")],
+                               title: "Excellent Protein Intake",
+                               description: "Averaging \(Int(currentPeriodStats.avgProtein))g/day — great for muscle support.")
                 }
-
                 if currentPeriodStats.consistencyScore >= 70 {
-                    insightRow(
-                        icon: "star.fill",
-                        color: .yellow,
-                        title: "Consistent logging",
-                        description: "You've been tracking \(currentPeriodStats.consistencyScore)% of days"
-                    )
+                    insightRow(icon: "star.fill",
+                               gradientColors: [Color(hex: "FFD60A"), Color(hex: "FF9F0A")],
+                               title: "Consistent Logger",
+                               description: "You've tracked \(currentPeriodStats.consistencyScore)% of days — keep the streak alive!")
                 }
-
                 let streakDays = calculateCurrentStreak()
                 if streakDays >= 3 {
-                    insightRow(
-                        icon: "flame.fill",
-                        color: .red,
-                        title: "\(streakDays)-day streak",
-                        description: "Keep it going!"
-                    )
+                    insightRow(icon: "flame.fill",
+                               gradientColors: [Color(hex: "FF4B6E"), Color(hex: "FF6B35")],
+                               title: "\(streakDays)-Day Streak 🔥",
+                               description: "Incredible consistency — don't break the chain!")
                 }
             }
         }
         .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
-        )
+        .glassCard(background: cardBackground, shadowColor: cardShadowColor)
     }
 
-    private func insightRow(icon: String, color: Color, title: String, description: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(color)
-                .frame(width: 36, height: 36)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(color.opacity(0.1))
-                )
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary)
-
-                Text(description)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+    private func insightRow(icon: String, gradientColors: [Color], title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: gradientColors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 42, height: 42)
+                Image(systemName: icon).font(.system(size: 18, weight: .bold)).foregroundColor(.white)
             }
+            .shadow(color: gradientColors.first?.opacity(0.4) ?? .clear, radius: 6, y: 3)
 
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 14, weight: .bold, design: .rounded)).foregroundColor(.primary)
+                Text(description).font(.system(size: 12)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
         }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 14)
+            .fill(Color.secondary.opacity(colorScheme == .dark ? 0.08 : 0.04)))
     }
 
     // MARK: - Detailed Stats Card
 
     private var detailedStatsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Detailed Statistics")
-                .font(.system(size: 18, weight: .bold))
-
-            VStack(spacing: 12) {
-                statRow(label: "Highest day", value: "\(currentPeriodStats.maxCalories) kcal",
-                       icon: "arrow.up.circle.fill", color: .orange)
-                statRow(label: "Lowest day", value: "\(currentPeriodStats.minCalories) kcal",
-                       icon: "arrow.down.circle.fill", color: .blue)
-                statRow(label: "Average fiber", value: String(format: "%.1f g/day", currentPeriodStats.avgFiber),
-                       icon: "leaf.fill", color: .green)
-                statRow(label: "Most active day", value: mostActiveDay,
-                       icon: "star.fill", color: .yellow)
+        VStack(alignment: .leading, spacing: 18) {
+            SectionHeader(title: "Detailed Stats", subtitle: "period breakdown")
+            VStack(spacing: 0) {
+                ForEach(Array(statsRows.enumerated()), id: \.offset) { index, row in
+                    statRow(data: row)
+                    if index < statsRows.count - 1 {
+                        Divider().padding(.leading, 50)
+                    }
+                }
             }
         }
         .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 5)
-        )
+        .glassCard(background: cardBackground, shadowColor: cardShadowColor)
     }
 
-    private func statRow(label: String, value: String, icon: String, color: Color) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(color)
-                .frame(width: 24)
+    private var statsRows: [(icon: String, color: Color, label: String, value: String)] {[
+        ("arrow.up.circle.fill",   Color(hex: "FF6B35"), "Highest day",      "\(currentPeriodStats.maxCalories) kcal"),
+        ("arrow.down.circle.fill", Color(hex: "5E9FFF"), "Lowest day",       "\(currentPeriodStats.minCalories) kcal"),
+        ("leaf.fill",              Color(hex: "34C759"), "Avg fiber",        String(format: "%.1f g/day", currentPeriodStats.avgFiber)),
+        ("star.fill",              Color(hex: "FFD60A"), "Most active day",  mostActiveDay)
+    ]}
 
-            Text(label)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
-
+    private func statRow(data: (icon: String, color: Color, label: String, value: String)) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9).fill(data.color.opacity(0.13)).frame(width: 34, height: 34)
+                Image(systemName: data.icon).font(.system(size: 15, weight: .semibold)).foregroundColor(data.color)
+            }
+            Text(data.label).font(.system(size: 14, weight: .medium)).foregroundColor(.secondary)
             Spacer()
-
-            Text(value)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
+            Text(data.value).font(.system(size: 14, weight: .bold, design: .rounded)).foregroundColor(.primary)
         }
+        .padding(.vertical, 12)
     }
 
-    // MARK: - Helper Methods
+    // MARK: - Helpers
 
     private var trendDirection: (icon: String, color: Color) {
         let change = currentPeriodStats.average(for: selectedMetric) -
-                    previousPeriodStats.average(for: selectedMetric)
-
-        if change > 0 {
-            return ("arrow.up.right", .green)
-        } else if change < 0 {
-            return ("arrow.down.right", .red)
-        } else {
-            return ("minus", .gray)
-        }
+                     previousPeriodStats.average(for: selectedMetric)
+        if change > 0 { return ("arrow.up.right",   Color(hex: "34C759")) }
+        else if change < 0 { return ("arrow.down.right", Color(hex: "FF4B6E")) }
+        else { return ("minus", .gray) }
     }
 
     private var trendPercentage: Double {
-        let current = currentPeriodStats.average(for: selectedMetric)
+        let current  = currentPeriodStats.average(for: selectedMetric)
         let previous = previousPeriodStats.average(for: selectedMetric)
-
         guard previous > 0 else { return 0 }
         return ((current - previous) / previous) * 100
     }
@@ -692,261 +772,223 @@ struct ProgressInsightsView: View {
 
     private func calculateStats(for data: [DailyAggregate]) -> PeriodStats {
         guard !data.isEmpty else {
-            return PeriodStats(totalCalories: 0, avgCalories: 0, maxCalories: 0,
-                             minCalories: 0, avgProtein: 0, avgCarbs: 0, avgFat: 0,
-                             avgFiber: 0, totalMeals: 0, consistencyScore: 0)
+            return PeriodStats(totalCalories: 0, avgCalories: 0, maxCalories: 0, minCalories: 0,
+                               avgProtein: 0, avgCarbs: 0, avgFat: 0, avgFiber: 0,
+                               totalMeals: 0, consistencyScore: 0)
         }
-
         let totalCalories = data.reduce(0) { $0 + $1.calories }
-        let avgCalories = Double(totalCalories) / Double(data.count)
-        let maxCalories = data.map { $0.calories }.max() ?? 0
-        let minCalories = data.map { $0.calories }.min() ?? 0
-
-        let avgProtein = data.reduce(0.0) { $0 + $1.protein } / Double(data.count)
-        let avgCarbs = data.reduce(0.0) { $0 + $1.carbs } / Double(data.count)
-        let avgFat = data.reduce(0.0) { $0 + $1.fat } / Double(data.count)
-        let avgFiber = data.reduce(0.0) { $0 + $1.fiber } / Double(data.count)
-
-        let totalMeals = data.reduce(0) { $0 + $1.mealCount }
-
-        let daysInPeriod = selectedTimeRange.rawValue
-        let consistencyScore = min(Int((Double(data.count) / Double(daysInPeriod)) * 100), 100)
-
+        let daysInPeriod  = selectedTimeRange.rawValue
         return PeriodStats(
-            totalCalories: totalCalories,
-            avgCalories: avgCalories,
-            maxCalories: maxCalories,
-            minCalories: minCalories,
-            avgProtein: avgProtein,
-            avgCarbs: avgCarbs,
-            avgFat: avgFat,
-            avgFiber: avgFiber,
-            totalMeals: totalMeals,
-            consistencyScore: consistencyScore
+            totalCalories:    totalCalories,
+            avgCalories:      Double(totalCalories) / Double(data.count),
+            maxCalories:      data.map { $0.calories }.max() ?? 0,
+            minCalories:      data.map { $0.calories }.min() ?? 0,
+            avgProtein:       data.reduce(0.0) { $0 + $1.protein } / Double(data.count),
+            avgCarbs:         data.reduce(0.0) { $0 + $1.carbs }   / Double(data.count),
+            avgFat:           data.reduce(0.0) { $0 + $1.fat }     / Double(data.count),
+            avgFiber:         data.reduce(0.0) { $0 + $1.fiber }   / Double(data.count),
+            totalMeals:       data.reduce(0) { $0 + $1.mealCount },
+            consistencyScore: min(Int((Double(data.count) / Double(daysInPeriod)) * 100), 100)
         )
     }
 
     private func macroPercentage(_ macro: MacroType) -> Double {
         let total = currentPeriodStats.avgProtein + currentPeriodStats.avgCarbs + currentPeriodStats.avgFat
         guard total > 0 else { return 0 }
-
-        let value: Double
         switch macro {
-        case .protein: value = currentPeriodStats.avgProtein
-        case .carbs: value = currentPeriodStats.avgCarbs
-        case .fat: value = currentPeriodStats.avgFat
+        case .protein: return (currentPeriodStats.avgProtein / total) * 100
+        case .carbs:   return (currentPeriodStats.avgCarbs   / total) * 100
+        case .fat:     return (currentPeriodStats.avgFat     / total) * 100
         }
-
-        return (value / total) * 100
     }
 
     private var mostActiveDay: String {
-        guard let maxDay = filteredData.max(by: { $0.mealCount < $1.mealCount }) else {
-            return "N/A"
-        }
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: maxDay.date)
+        guard let maxDay = filteredData.max(by: { $0.mealCount < $1.mealCount }) else { return "N/A" }
+        let fmt = DateFormatter(); fmt.dateFormat = "MMM d"
+        return fmt.string(from: maxDay.date)
     }
 
     private func calculateCurrentStreak() -> Int {
         guard !dailyAggregates.isEmpty else { return 0 }
-
-        let sortedDays = dailyAggregates.sorted { $0.date > $1.date }
         var streak = 0
-        var currentDate = Calendar.current.startOfDay(for: Date())
-
-        for day in sortedDays {
-            if Calendar.current.isDate(day.date, inSameDayAs: currentDate) {
-                streak += 1
-                currentDate = Calendar.current.date(byAdding: .day, value: -1, to: currentDate) ?? currentDate
-            } else {
-                break
-            }
+        var current = Calendar.current.startOfDay(for: Date())
+        for day in dailyAggregates.sorted(by: { $0.date > $1.date }) {
+            guard Calendar.current.isDate(day.date, inSameDayAs: current) else { break }
+            streak += 1
+            current = Calendar.current.date(byAdding: .day, value: -1, to: current) ?? current
         }
-
         return streak
     }
 }
 
-// MARK: - Supporting Types
+// MARK: - UIKit bridge: force light-content (white) status-bar icons at all times
+// This ensures the clock/battery text is white on the orange hero gradient
+// AND white on the orange scrolled nav bar.
+
+private struct StatusBarStyleModifier: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> StatusBarViewController { StatusBarViewController() }
+    func updateUIViewController(_ vc: StatusBarViewController, context: Context) {}
+}
+
+private class StatusBarViewController: UIViewController {
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+    }
+}
+
+// MARK: - Scroll Offset PreferenceKey
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+// MARK: - Reusable Sub-views
+
+private struct SectionHeader: View {
+    let title: String; let subtitle: String
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 8) {
+            Text(title).font(.system(size: 18, weight: .black, design: .rounded)).foregroundColor(.primary)
+            Text(subtitle).font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct HeroBadge: View {
+    let value: String; let label: String
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(value).font(.system(size: 13, weight: .black, design: .rounded)).foregroundColor(.white)
+            Text(label).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.75))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color.white.opacity(0.18)).clipShape(Capsule())
+    }
+}
+
+// MARK: - Macro Donut Chart
+
+struct MacroDonutChart: View {
+    let protein: Double; let carbs: Double; let fat: Double
+
+    private var total: Double { protein + carbs + fat }
+    private var pP: Double { total > 0 ? protein / total : 0 }
+    private var pC: Double { total > 0 ? carbs   / total : 0 }
+    private var pF: Double { total > 0 ? fat     / total : 0 }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.secondary.opacity(0.1), lineWidth: 18)
+            Circle().trim(from: 0, to: pP)
+                .stroke(Color(hex: "FF4B6E"), style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Circle().trim(from: 0, to: pC)
+                .stroke(Color(hex: "5E9FFF"), style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                .rotationEffect(.degrees(-90 + pP * 360))
+            Circle().trim(from: 0, to: pF)
+                .stroke(Color(hex: "FFD60A"), style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                .rotationEffect(.degrees(-90 + (pP + pC) * 360))
+        }
+    }
+}
+
+// MARK: - Glass Card modifier
+
+private struct GlassCardModifier: ViewModifier {
+    let background: Color; let shadowColor: Color
+    func body(content: Content) -> some View {
+        content.background(
+            RoundedRectangle(cornerRadius: 22)
+                .fill(background)
+                .shadow(color: shadowColor, radius: 18, x: 0, y: 6)
+        )
+    }
+}
+
+extension View {
+    func glassCard(background: Color, shadowColor: Color) -> some View {
+        modifier(GlassCardModifier(background: background, shadowColor: shadowColor))
+    }
+}
+
+// MARK: - NutritionMetric unit extension
+
+extension NutritionMetric {
+    var unit: String {
+        switch self {
+        case .calories:                     return "kcal avg/day"
+        case .protein, .carbs, .fat, .fiber: return "g avg/day"
+        }
+    }
+}
+
+// ── Supporting enums & structs (unchanged) ──────────────────────────────────
 
 enum TimeRange: Int, CaseIterable {
-    case week = 7
-    case twoWeeks = 14
-    case month = 30
-
+    case week = 7, twoWeeks = 14, month = 30
     var displayName: String {
-        switch self {
-        case .week: return "7D"
-        case .twoWeeks: return "14D"
-        case .month: return "30D"
-        }
+        switch self { case .week: "7 Days"; case .twoWeeks: "14 Days"; case .month: "30 Days" }
     }
-
-    var calendarComponent: Calendar.Component {
-        return .day
-    }
-
+    var calendarComponent: Calendar.Component { .day }
     var xAxisStride: Calendar.Component {
-        switch self {
-        case .week: return .day
-        case .twoWeeks: return .day
-        case .month: return .weekOfYear
-        }
+        switch self { case .week, .twoWeeks: .day; case .month: .weekOfYear }
     }
-
-    var dateFormat: Date.FormatStyle {
-        switch self {
-        case .week, .twoWeeks: return .dateTime.month(.abbreviated).day()
-        case .month: return .dateTime.month(.abbreviated).day()
-        }
-    }
+    var dateFormat: Date.FormatStyle { .dateTime.month(.abbreviated).day() }
 }
 
 enum NutritionMetric: CaseIterable {
     case calories, protein, carbs, fat, fiber
-
     var displayName: String {
-        switch self {
-        case .calories: return "Calories"
-        case .protein: return "Protein"
-        case .carbs: return "Carbs"
-        case .fat: return "Fat"
-        case .fiber: return "Fiber"
-        }
+        switch self { case .calories: "Calories"; case .protein: "Protein";
+                      case .carbs: "Carbs"; case .fat: "Fat"; case .fiber: "Fiber" }
     }
-
     var shortName: String {
-        switch self {
-        case .calories: return "Cal"
-        case .protein: return "Protein"
-        case .carbs: return "Carbs"
-        case .fat: return "Fat"
-        case .fiber: return "Fiber"
-        }
+        switch self { case .calories: "Cal"; case .protein: "Protein";
+                      case .carbs: "Carbs"; case .fat: "Fat"; case .fiber: "Fiber" }
     }
-
     var icon: String {
-        switch self {
-        case .calories: return "🔥"
-        case .protein: return "🥩"
-        case .carbs: return "🍞"
-        case .fat: return "🥑"
-        case .fiber: return "🌾"
-        }
+        switch self { case .calories: "🔥"; case .protein: "🥩"; case .carbs: "🍞";
+                      case .fat: "🥑"; case .fiber: "🌾" }
     }
-
     var color: Color {
         switch self {
-        case .calories: return .orange
-        case .protein: return .red
-        case .carbs: return .blue
-        case .fat: return .yellow
-        case .fiber: return .green
+        case .calories: Color(hex: "FF6B35"); case .protein: Color(hex: "FF4B6E")
+        case .carbs:    Color(hex: "5E9FFF"); case .fat:     Color(hex: "FFD60A")
+        case .fiber:    Color(hex: "34C759")
         }
     }
 }
 
-enum MacroType {
-    case protein, carbs, fat
-}
+enum MacroType { case protein, carbs, fat }
 
 struct DailyAggregate: Identifiable {
     let id = UUID()
-    let date: Date
-    let calories: Int
-    let protein: Double
-    let carbs: Double
-    let fat: Double
-    let fiber: Double
+    let date: Date; let calories: Int
+    let protein, carbs, fat, fiber: Double
     let mealCount: Int
-
     func value(for metric: NutritionMetric) -> Double {
         switch metric {
-        case .calories: return Double(calories)
-        case .protein: return protein
-        case .carbs: return carbs
-        case .fat: return fat
-        case .fiber: return fiber
+        case .calories: Double(calories); case .protein: protein
+        case .carbs: carbs; case .fat: fat; case .fiber: fiber
         }
     }
 }
 
 struct PeriodStats {
-    let totalCalories: Int
-    let avgCalories: Double
-    let maxCalories: Int
-    let minCalories: Int
-    let avgProtein: Double
-    let avgCarbs: Double
-    let avgFat: Double
-    let avgFiber: Double
-    let totalMeals: Int
-    let consistencyScore: Int
-
+    let totalCalories: Int; let avgCalories: Double
+    let maxCalories, minCalories: Int
+    let avgProtein, avgCarbs, avgFat, avgFiber: Double
+    let totalMeals: Int; let consistencyScore: Int
     func average(for metric: NutritionMetric) -> Double {
         switch metric {
-        case .calories: return avgCalories
-        case .protein: return avgProtein
-        case .carbs: return avgCarbs
-        case .fat: return avgFat
-        case .fiber: return avgFiber
+        case .calories: avgCalories; case .protein: avgProtein
+        case .carbs: avgCarbs; case .fat: avgFat; case .fiber: avgFiber
         }
     }
 }
-
-// MARK: - Macro Pie Chart
-
-struct MacroPieChart: View {
-    let protein: Double
-    let carbs: Double
-    let fat: Double
-
-    private var total: Double {
-        protein + carbs + fat
-    }
-
-    private var proteinAngle: Angle {
-        guard total > 0 else { return .degrees(0) }
-        return .degrees((protein / total) * 360)
-    }
-
-    private var carbsAngle: Angle {
-        guard total > 0 else { return .degrees(0) }
-        return .degrees((carbs / total) * 360)
-    }
-
-    private var fatAngle: Angle {
-        guard total > 0 else { return .degrees(0) }
-        return .degrees((fat / total) * 360)
-    }
-
-    var body: some View {
-        ZStack {
-            // Protein segment
-            Circle()
-                .trim(from: 0, to: protein / total)
-                .stroke(Color.red, lineWidth: 25)
-                .rotationEffect(.degrees(-90))
-
-            // Carbs segment
-            Circle()
-                .trim(from: 0, to: carbs / total)
-                .stroke(Color.blue, lineWidth: 25)
-                .rotationEffect(Angle(degrees: -90 + proteinAngle.degrees))
-
-            // Fat segment
-            Circle()
-                .trim(from: 0, to: fat / total)
-                .stroke(Color.yellow, lineWidth: 25)
-                .rotationEffect(Angle(degrees: -90 + proteinAngle.degrees + carbsAngle.degrees))
-        }
-    }
-}
-
-// MARK: - Preview
 
 #Preview {
     ProgressInsightsView()

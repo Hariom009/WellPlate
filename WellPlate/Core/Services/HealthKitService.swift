@@ -112,22 +112,52 @@ final class HealthKitService: HealthKitServiceProtocol {
             ) { _, samples, error in
                 if let error = error { cont.resume(throwing: error); return }
 
-                let asleepValues: Set<Int> = [
-                    HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
-                    HKCategoryValueSleepAnalysis.asleepCore.rawValue,
-                    HKCategoryValueSleepAnalysis.asleepREM.rawValue,
-                    HKCategoryValueSleepAnalysis.asleepDeep.rawValue
+                let stageMap: [Int: SleepStage] = [
+                    HKCategoryValueSleepAnalysis.asleepCore.rawValue:        .core,
+                    HKCategoryValueSleepAnalysis.asleepREM.rawValue:         .rem,
+                    HKCategoryValueSleepAnalysis.asleepDeep.rawValue:        .deep,
+                    HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue: .unspecified
                 ]
                 let result = (samples as? [HKCategorySample] ?? [])
-                    .filter { asleepValues.contains($0.value) }
-                    .map { s -> SleepSample in
+                    .compactMap { s -> SleepSample? in
+                        guard let stage = stageMap[s.value] else { return nil }
                         let hours = s.endDate.timeIntervalSince(s.startDate) / 3600
-                        return SleepSample(date: s.startDate, value: hours)
+                        return SleepSample(date: s.startDate, value: hours, stage: stage)
                     }
                 cont.resume(returning: result)
             }
             store.execute(query)
         }
+    }
+
+    func fetchDailySleepSummaries(for range: DateInterval) async throws -> [DailySleepSummary] {
+        let samples = try await fetchSleep(for: range)
+        let cal = Calendar.current
+
+        // Group by wake-up calendar date (endDate ≈ startDate + value hours).
+        // This ensures an overnight session (11 PM–7 AM) belongs to the morning date.
+        var grouped: [Date: [SleepSample]] = [:]
+        for s in samples {
+            let wakeUp = s.date.addingTimeInterval(s.value * 3600)
+            let day = cal.startOfDay(for: wakeUp)
+            grouped[day, default: []].append(s)
+        }
+
+        return grouped.map { day, daySamples in
+            let core = daySamples.filter { $0.stage == .core }.map(\.value).reduce(0, +)
+            let rem  = daySamples.filter { $0.stage == .rem  }.map(\.value).reduce(0, +)
+            let deep = daySamples.filter { $0.stage == .deep }.map(\.value).reduce(0, +)
+            let unspec = daySamples.filter { $0.stage == .unspecified }.map(\.value).reduce(0, +)
+            let total = core + rem + deep + unspec
+            return DailySleepSummary(
+                date: day,
+                totalHours: total,
+                coreHours: core,
+                remHours: rem,
+                deepHours: deep
+            )
+        }
+        .sorted { $0.date < $1.date }
     }
 
     // MARK: - Private Helpers

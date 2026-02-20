@@ -28,6 +28,9 @@ protocol HealthKitServiceProtocol {
     /// Sleep sessions (hours) over the given interval.
     func fetchSleep(for range: DateInterval) async throws -> [SleepSample]
 
+    /// Aggregated per-night sleep summaries with stage breakdowns.
+    func fetchDailySleepSummaries(for range: DateInterval) async throws -> [DailySleepSummary]
+
     /// Daily dietary water (litres) sums over the given interval.
     func fetchWater(for range: DateInterval) async throws -> [DailyMetricSample]
 }
