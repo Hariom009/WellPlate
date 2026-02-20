@@ -13,29 +13,31 @@ struct MainTabView: View {
     var body: some View {
         TabView {
             // MARK: - Intake
-            HomeView(viewModel: HomeViewModel(modelContext: modelContext))
-                .tabItem {
-                    Label("Intake", systemImage: "fork.knife")
-                }
+            Tab("Intake", systemImage: "fork.knife") {
+                HomeView(viewModel: HomeViewModel(modelContext: modelContext))
+            }
 
             // MARK: - Burn
-            BurnView()
-                .tabItem {
-                    Label("Burn", systemImage: "flame.fill")
-                }
+            Tab("Burn", systemImage: "flame.fill") {
+                BurnView()
+            }
 
             // MARK: - Sleep
-            SleepView()
-                .tabItem {
-                    Label("Sleep", systemImage: "moon.zzz.fill")
-                }
+            Tab("Sleep", systemImage: "moon.zzz.fill") {
+                SleepView()
+            }
 
-            // MARK: - Profile
-            ProfilePlaceholderView()
-                .tabItem {
-                    Label("Profile", systemImage: "person.crop.circle.fill")
-                }
+            // MARK: - Stress
+            Tab("Stress", systemImage: "brain.head.profile.fill") {
+                StressPlaceholderView()
+            }
+
+            // MARK: - Profile (separated — like Search in Apple Music)
+            Tab("Profile", systemImage: "person.crop.circle.fill", role: .search) {
+                ProfilePlaceholderView()
+            }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .tint(.orange)
     }
 }

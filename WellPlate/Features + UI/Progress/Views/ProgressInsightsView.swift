@@ -18,6 +18,7 @@ struct ProgressInsightsView: View {
     @State private var headerAppeared = false
     @State private var cardsAppeared = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var auroraPhase: CGFloat = 0
     @State private var safeTopInset: CGFloat = 0
 
     init() {
@@ -101,7 +102,7 @@ struct ProgressInsightsView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack(alignment: .top) {
                 bgGradient.ignoresSafeArea()
 
@@ -158,60 +159,79 @@ struct ProgressInsightsView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     cardsAppeared = true
                 }
+                withAnimation(.easeInOut(duration: 6).repeatForever(autoreverses: true)) {
+                    auroraPhase = 1.0
+                }
             }
         }
         // ─── Status-bar + nav-bar overlay ────────────────────────────────────
-        // Sits OUTSIDE NavigationView so it renders above the system white fill.
+        // Sits OUTSIDE NavigationStack so it renders above the system white fill.
         .overlay(alignment: .top) {
             VStack(spacing: 0) {
 
-                // ① Status-bar area — fully opaque orange when scrolled,
-                //    so it completely replaces the white system background.
-                Color(hex: "FF6B35")
-                    .opacity(scrollProgress)          // 0 → transparent, 1 → solid orange
-                    .frame(height: safeTopInset)
-                    .allowsHitTesting(false)
+                // ── Nav bar group: fades in as one unit ──────────────────────
+                VStack(spacing: 0) {
+                    // ① Status-bar fill
+                    Color(hex: "FF6B35")
+                        .frame(height: safeTopInset)
+                        .allowsHitTesting(false)
 
-                // ② Nav bar content row
-                HStack {
-                    Text("Progress & Insights")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
-                        .foregroundColor(
-                            colorScheme == .dark
-                                ? Color(hex: "FFDAC8")
-                                : Color(hex: "C0421A")
-                        )
+                    // ② Nav bar row
+                    HStack {
+                        Text("Progress & Insights")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundColor(
+                                colorScheme == .dark
+                                    ? Color(hex: "FFDAC8")
+                                    : Color(hex: "C0421A")
+                            )
 
-                    Spacer()
+                        Spacer()
 
-                    HStack(spacing: 8) {
-                        Button(action: { showShareSheet = true }) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(Color(hex: "FF6B35"))
-                                .frame(width: 32, height: 32)
-                                .background(Color(hex: "FF6B35").opacity(0.15))
-                                .clipShape(Circle())
-                        }
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(Color(hex: "FF6B35"))
-                                .frame(width: 32, height: 32)
-                                .background(Color(hex: "FF6B35").opacity(0.15))
-                                .clipShape(Circle())
+                        HStack(spacing: 8) {
+                            Button(action: { showShareSheet = true }) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(Color(hex: "FF6B35"))
+                                    .frame(width: 32, height: 32)
+                                    .background(Color(hex: "FF6B35").opacity(0.15))
+                                    .clipShape(Circle())
+                            }
+                            Button(action: { dismiss() }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(Color(hex: "FF6B35"))
+                                    .frame(width: 32, height: 32)
+                                    .background(Color(hex: "FF6B35").opacity(0.15))
+                                    .clipShape(Circle())
+                            }
                         }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(
+                        // Glass material + orange tint
+                        ZStack {
+                            Rectangle().fill(Material.regular)
+                            Rectangle().fill(Color(hex: "FF6B35").opacity(0.7))
+                        }
+                    )
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(
-                    Color(hex: "FF6B35")
-                        .opacity(scrollProgress)      // nav bar row matches status bar
-                )
+                .opacity(scrollProgress)   // nav group fades in together
+
+                // ── Sticky time range selector — independent opacity ──────────
+                if scrollProgress > 0.75 {
+                    timeRangeSelector
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial)
+                        .overlay(Divider(), alignment: .bottom)
+                        .opacity(min(1, (scrollProgress - 0.75) / 0.25))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
-            .opacity(scrollProgress)
             .ignoresSafeArea(edges: .top)
+            .animation(.easeInOut(duration: 0.2), value: scrollProgress > 0.75)
         }
         // ─── Force light status-bar icons while hero is visible, ─────────────
         // dark (black) icons would clash with the white bg before scrolling.
@@ -225,6 +245,15 @@ struct ProgressInsightsView: View {
 
     private var heroHeader: some View {
         ZStack(alignment: .bottomLeading) {
+            // Drag indicator pill (visual only — native swipe handles dismiss)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(.white.opacity(0.4))
+                .frame(width: 36, height: 4)
+                .padding(.top, safeTopInset + 8)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
+                .zIndex(10)
+
             LinearGradient(
                 colors: [Color(hex: "FF6B35"), Color(hex: "FF8C42"), Color(hex: "FFA500")],
                 startPoint: .topLeading,
@@ -232,41 +261,49 @@ struct ProgressInsightsView: View {
             )
             .ignoresSafeArea(edges: .top)
 
-            Circle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 220, height: 220)
-                .offset(x: 180, y: -40)
-                .blur(radius: 2)
+            // Blob 1 — large ellipse, top-right
+            Ellipse()
+                .fill(.ultraThinMaterial)
+                .frame(width: 260, height: 200)
+                .blur(radius: 28)
+                .rotationEffect(.degrees(Double(-15) + auroraPhase * 12))
+                .offset(x: 130, y: CGFloat(-50) + auroraPhase * 18)
+                .opacity(0.65)
 
+            // Blob 2 — circle, far right
             Circle()
-                .fill(Color.white.opacity(0.06))
-                .frame(width: 140, height: 140)
-                .offset(x: 260, y: 30)
+                .fill(.ultraThinMaterial)
+                .frame(width: 150)
+                .blur(radius: 25)
+                .offset(x: 240, y: 30 - auroraPhase * 14)
+                .opacity(0.45)
+
+            // Blob 3 — small circle, bottom-left glow
+            Circle()
+                .fill(.ultraThinMaterial)
+                .frame(width: 90)
+                .blur(radius: 20)
+                .offset(x: -20, y: 80 + auroraPhase * 10)
+                .opacity(0.3)
 
             GeometryReader { geo in
                 VStack(alignment: .leading, spacing: 6) {
                     Spacer()
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Progress")
-                                .font(.system(size: 34, weight: .black, design: .rounded))
-                                .foregroundColor(.white)
-                            Text("& Insights")
-                                .font(.system(size: 34, weight: .black, design: .rounded))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
+                        Text("Progress & Insights")
+                            .font(.system(size: 30, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
 
                         Spacer()
 
-                        HStack{
-                            Button(action: { dismiss() }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .frame(width: 40, height: 40)
-                                    .background(Color.white.opacity(0.2))
-                                    .clipShape(Circle())
-                            }
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(.ultraThinMaterial)
+                                .clipShape(Circle())
+                                .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.75))
                         }
                     }
 
@@ -282,7 +319,10 @@ struct ProgressInsightsView: View {
                     HStack(spacing: 8) {
                         HeroBadge(value: "\(currentPeriodStats.totalMeals)", label: "meals")
                         HeroBadge(value: "\(currentPeriodStats.consistencyScore)%", label: "consistent")
-                        HeroBadge(value: "\(currentPeriodStats.maxCalories)", label: "best day kcal")
+                        HeroBadge(
+                            value: calculateCurrentStreak() > 0 ? "\(calculateCurrentStreak())🔥" : "–",
+                            label: "day streak"
+                        )
                     }
                     .padding(.top, 10)
                 }
@@ -294,6 +334,18 @@ struct ProgressInsightsView: View {
                 .animation(.spring(response: 0.6, dampingFraction: 0.75), value: headerAppeared)
             }
             .ignoresSafeArea(edges: .top)
+
+            // Bottom scrim — fades hero into card area
+            VStack {
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, Color(hex: colorScheme == .dark ? "0F0F1A" : "F5F5FF")],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .frame(height: 44)
+            }
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
         }
     }
 
@@ -865,7 +917,17 @@ private struct HeroBadge: View {
             Text(label).font(.system(size: 11, weight: .semibold)).foregroundColor(.white.opacity(0.75))
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
-        .background(Color.white.opacity(0.18)).clipShape(Capsule())
+        .background(.ultraThinMaterial)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule().strokeBorder(
+                LinearGradient(
+                    colors: [.white.opacity(0.55), .white.opacity(0.08)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ),
+                lineWidth: 0.75
+            )
+        )
     }
 }
 
@@ -898,13 +960,38 @@ struct MacroDonutChart: View {
 // MARK: - Glass Card modifier
 
 private struct GlassCardModifier: ViewModifier {
-    let background: Color; let shadowColor: Color
+    let background: Color
+    let shadowColor: Color
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
-        content.background(
-            RoundedRectangle(cornerRadius: 22)
-                .fill(background)
-                .shadow(color: shadowColor, radius: 18, x: 0, y: 6)
-        )
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 22)
+                    .fill(background)
+                    .overlay {
+                        if colorScheme == .dark {
+                            RoundedRectangle(cornerRadius: 22)
+                                .fill(.ultraThinMaterial)
+                                .opacity(0.35)
+                        }
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(colorScheme == .dark ? 0.18 : 0.6),
+                                        .white.opacity(0.0)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .center
+                                ),
+                                lineWidth: 0.75
+                            )
+                    }
+                    .shadow(color: shadowColor, radius: 18, x: 0, y: 6)
+            )
     }
 }
 
