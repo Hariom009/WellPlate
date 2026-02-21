@@ -29,7 +29,7 @@ struct MainTabView: View {
 
             // MARK: - Stress
             Tab("Stress", systemImage: "brain.head.profile.fill") {
-                StressPlaceholderView()
+                StressView(viewModel: StressViewModel(modelContext: modelContext))
             }
 
             // MARK: - Profile (separated — like Search in Apple Music)
