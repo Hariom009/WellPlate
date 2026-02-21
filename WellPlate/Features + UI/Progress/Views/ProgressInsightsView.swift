@@ -106,27 +106,13 @@ struct ProgressInsightsView: View {
             ZStack(alignment: .top) {
                 bgGradient.ignoresSafeArea()
 
-                GeometryReader { outerGeo in
-                    Color.clear
-                        .onAppear { safeTopInset = outerGeo.safeAreaInsets.top }
-                }
-                .frame(height: 0)
+//                GeometryReader { outerGeo in
+//                    Color.clear
+//                        .onAppear { safeTopInset = outerGeo.safeAreaInsets.top }
+//                }
+//                .frame(height: 0)
 
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(
-                                    key: ScrollOffsetKey.self,
-                                    value: geo.frame(in: .named("scrollArea")).minY
-                                )
-                        }
-                        .frame(height: 0)
-
-                        heroHeader
-                            .padding(.bottom, 24)
-                            .frame(height: 380)
-
                         VStack(spacing: 20) {
                             timeRangeSelector
                             mainChartCard
@@ -140,9 +126,8 @@ struct ProgressInsightsView: View {
                         .opacity(cardsAppeared ? 1 : 0)
                         .offset(y: cardsAppeared ? 0 : 30)
                         .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.25), value: cardsAppeared)
-                    }
+                    
                 }
-                .ignoresSafeArea(edges: .top)
                 .coordinateSpace(name: "scrollArea")
                 .onPreferenceChange(ScrollOffsetKey.self) { value in
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
@@ -150,7 +135,8 @@ struct ProgressInsightsView: View {
                     }
                 }
             }
-            .navigationBarHidden(true)
+            .navigationTitle("Progress & Insights")
+            .navigationBarTitleDisplayMode(.inline)
             .background(bgGradient.ignoresSafeArea())
             .onAppear {
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
@@ -163,7 +149,18 @@ struct ProgressInsightsView: View {
                     auroraPhase = 1.0
                 }
             }
+            .toolbar{
+                ToolbarItem(placement: .topBarLeading){
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white)
+                            .frame(width: 20, height: 20)
+                    }
+                }
+            }
         }
+        
         // ─── Status-bar + nav-bar overlay ────────────────────────────────────
         // Sits OUTSIDE NavigationStack so it renders above the system white fill.
         .overlay(alignment: .top) {
@@ -241,113 +238,6 @@ struct ProgressInsightsView: View {
         .background(StatusBarStyleModifier())
     }
 
-    // MARK: - Hero Header
-
-    private var heroHeader: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Drag indicator pill (visual only — native swipe handles dismiss)
-            RoundedRectangle(cornerRadius: 3)
-                .fill(.white.opacity(0.4))
-                .frame(width: 36, height: 4)
-                .padding(.top, safeTopInset + 8)
-                .frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
-                .zIndex(10)
-
-            LinearGradient(
-                colors: [Color(hex: "FF6B35"), Color(hex: "FF8C42"), Color(hex: "FFA500")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea(edges: .top)
-
-            // Blob 1 — large ellipse, top-right
-            Ellipse()
-                .fill(.ultraThinMaterial)
-                .frame(width: 260, height: 200)
-                .blur(radius: 28)
-                .rotationEffect(.degrees(Double(-15) + auroraPhase * 12))
-                .offset(x: 130, y: CGFloat(-50) + auroraPhase * 18)
-                .opacity(0.65)
-
-            // Blob 2 — circle, far right
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 150)
-                .blur(radius: 25)
-                .offset(x: 240, y: 30 - auroraPhase * 14)
-                .opacity(0.45)
-
-            // Blob 3 — small circle, bottom-left glow
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 90)
-                .blur(radius: 20)
-                .offset(x: -20, y: 80 + auroraPhase * 10)
-                .opacity(0.3)
-
-            GeometryReader { geo in
-                VStack(alignment: .leading, spacing: 6) {
-                    Spacer()
-                    HStack {
-                        Text("Progress & Insights")
-                            .font(.system(size: 30, weight: .black, design: .rounded))
-                            .foregroundColor(.white)
-
-                        Spacer()
-
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 40, height: 40)
-                                .background(.ultraThinMaterial)
-                                .clipShape(Circle())
-                                .overlay(Circle().strokeBorder(.white.opacity(0.3), lineWidth: 0.75))
-                        }
-                    }
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Last \(selectedTimeRange.rawValue) days")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundColor(.white.opacity(0.75))
-                    .padding(.top, 4)
-
-                    HStack(spacing: 8) {
-                        HeroBadge(value: "\(currentPeriodStats.totalMeals)", label: "meals")
-                        HeroBadge(value: "\(currentPeriodStats.consistencyScore)%", label: "consistent")
-                        HeroBadge(
-                            value: calculateCurrentStreak() > 0 ? "\(calculateCurrentStreak())🔥" : "–",
-                            label: "day streak"
-                        )
-                    }
-                    .padding(.top, 10)
-                }
-                .padding(.top, geo.safeAreaInsets.top + 20)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 56)
-                .opacity(headerAppeared ? 1 : 0)
-                .offset(y: headerAppeared ? 0 : -20)
-                .animation(.spring(response: 0.6, dampingFraction: 0.75), value: headerAppeared)
-            }
-            .ignoresSafeArea(edges: .top)
-
-            // Bottom scrim — fades hero into card area
-            VStack {
-                Spacer()
-                LinearGradient(
-                    colors: [.clear, Color(hex: colorScheme == .dark ? "0F0F1A" : "F5F5FF")],
-                    startPoint: .top, endPoint: .bottom
-                )
-                .frame(height: 44)
-            }
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-        }
-    }
 
     // MARK: - Time Range Selector
 
