@@ -26,6 +26,10 @@ struct TotalActivityReport: DeviceActivityReportScene {
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
     ) async -> ActivityReport {
+        // NOTE: This extension runs in Apple's privacy sandbox.
+        // Raw data CANNOT be written to shared storage (UserDefaults, CoreData, etc.).
+        // This view is for visual display only. Numeric values reach the main app
+        // exclusively via the DeviceActivityMonitor threshold events.
         var totalDuration: TimeInterval = 0
         var appCount = 0
 

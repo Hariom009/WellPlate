@@ -2,7 +2,7 @@ import SwiftUI
 
 enum AppColors {
     // MARK: - Brand / Primary
-    static let primary = Color("Primary")
+    static let primary = Color("AppPrimary")
     static let primaryContainer = Color("PrimaryContainer")  // softer orange background
     static let onPrimary = Color("OnPrimary")                // text/icons on primary
 
@@ -40,4 +40,3 @@ extension View {
         self.shadow(color: Color(.label).opacity(0.08), radius: radius, x: x, y: y)
     }
 }
-

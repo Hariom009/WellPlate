@@ -13,8 +13,7 @@ import Combine
 // MARK: - Screen Time Source
 
 enum ScreenTimeSource {
-    case auto        // from DeviceActivityMonitor thresholds
-    case manual      // user entered via slider
+    case auto        // from DeviceActivity report / threshold resolver
     case none        // no data for today
 }
 
@@ -30,7 +29,6 @@ final class StressViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isAuthorized = false
     @Published var errorMessage: String? = nil
-    @Published var screenTimeHours: Double = 0
     @Published var screenTimeSource: ScreenTimeSource = .none
 
     // MARK: - Computed
@@ -55,31 +53,14 @@ final class StressViewModel: ObservableObject {
     private let healthService: HealthKitServiceProtocol
     private let modelContext: ModelContext
 
-    // MARK: - Date Formatter (reuse to avoid allocation per call)
-
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
     // MARK: - Init
 
     init(healthService: HealthKitServiceProtocol = HealthKitService(), modelContext: ModelContext) {
         self.healthService = healthService
         self.modelContext = modelContext
 
-        // Load screen time: prefer auto-detected, fall back to manual
-        if let autoHours = ScreenTimeManager.shared.currentAutoDetectedHours {
-            self.screenTimeHours = autoHours
+        if ScreenTimeManager.shared.currentAutoDetectedReading != nil {
             self.screenTimeSource = .auto
-        } else {
-            let key = Self.screenTimeKeyForToday()
-            if UserDefaults.standard.object(forKey: key) != nil {
-                self.screenTimeHours = UserDefaults.standard.double(forKey: key)
-                self.screenTimeSource = .manual
-            }
         }
     }
 
@@ -132,14 +113,6 @@ final class StressViewModel: ObservableObject {
         refreshScreenTimeFactor()
     }
 
-    func updateScreenTime(_ hours: Double) {
-        screenTimeHours = hours
-        screenTimeSource = .manual
-        let key = Self.screenTimeKeyForToday()
-        UserDefaults.standard.set(hours, forKey: key)
-        refreshScreenTimeFactor()
-    }
-
     func refreshDietFactor() {
         let today = Calendar.current.startOfDay(for: Date())
         let descriptor = FetchDescriptor<FoodLogEntry>(
@@ -150,6 +123,10 @@ final class StressViewModel: ObservableObject {
         let logs = (try? modelContext.fetch(descriptor)) ?? []
         let score = computeDietScore(logs: logs)
         dietFactor = buildDietFactor(score: score, logs: logs)
+    }
+
+    func refreshScreenTimeOnly() {
+        refreshScreenTimeFactor()
     }
 
     // MARK: - Private: Safe Fetchers (return nil on error)
@@ -233,16 +210,9 @@ final class StressViewModel: ObservableObject {
     }
 
     private func computeScreenTimeScore(hours: Double?) -> Double {
-        guard let h = hours else { return 12.5 }
-
-        switch h {
-        case ..<1:    return 2
-        case 1..<2:   return lerp(from: 2,  to: 6,  t: (h - 1) / 1)
-        case 2..<4:   return lerp(from: 6,  to: 14, t: (h - 2) / 2)
-        case 4..<6:   return lerp(from: 14, to: 20, t: (h - 4) / 2)
-        case 6..<8:   return lerp(from: 20, to: 24, t: (h - 6) / 2)
-        default:      return 25
-        }
+        guard let h = hours else { return 0 }
+        // 2 points per hour, capped at 25
+        return min(25, h * 2.0)
     }
 
     // MARK: - Factor Builders
@@ -309,53 +279,34 @@ final class StressViewModel: ObservableObject {
     }
 
     private func refreshScreenTimeFactor() {
-        // Priority: auto-detected > manual > none
-        let resolvedHours: Double?
-        var source: ScreenTimeSource = .none
+        let reading = ScreenTimeManager.shared.currentAutoDetectedReading
+        let scoreHours = reading?.rawHours
 
-        if let autoHours = ScreenTimeManager.shared.currentAutoDetectedHours {
-            resolvedHours = autoHours
-            source = .auto
-        } else {
-            let key = Self.screenTimeKeyForToday()
-            if UserDefaults.standard.object(forKey: key) != nil {
-                resolvedHours = UserDefaults.standard.double(forKey: key)
-                source = .manual
-            } else {
-                resolvedHours = nil
-            }
-        }
+        screenTimeSource = reading != nil ? .auto : .none
 
-        screenTimeSource = source
-        if let h = resolvedHours { screenTimeHours = h }
-
-        let score = computeScreenTimeScore(hours: resolvedHours)
+        let score = computeScreenTimeScore(hours: scoreHours)
+        #if DEBUG
+        let hoursLog = scoreHours.map { String(format: "%.3f", $0) } ?? "nil"
+        print("[StressViewModel] screenTime hours=\(hoursLog) score=\(String(format: "%.2f", score))")
+        #endif
 
         let status: String
-        switch source {
-        case .auto:
-            status = String(format: "%.0fh auto-detected", resolvedHours ?? 0)
-        case .manual:
-            status = String(format: "%.1f hours today", resolvedHours ?? 0)
-        case .none:
-            status = "Tap to enter"
-        }
-
         let detail: String
-        if source == .none { detail = "No entry for today" }
-        else if score < 8 { detail = "Low screen time 👍" }
-        else if score < 16 { detail = "Moderate screen usage" }
-        else { detail = "Consider reducing screen time" }
+        if let reading {
+            status = "\(reading.displayRoundedHours)h detected (±15m)"
+            if score < 8 { detail = "Low screen time 👍" }
+            else if score < 16 { detail = "Moderate screen usage" }
+            else { detail = "Consider reducing screen time" }
+        } else {
+            status = "Under 4h today"
+            detail = "Score adds 2pts per hour above 4h"
+        }
 
         screenTimeFactor = StressFactorResult(title: "Screen Time", score: score, maxScore: 25, icon: "iphone",
                                               accentColor: .cyan, statusText: status, detailText: detail)
     }
 
     // MARK: - Helpers
-
-    private static func screenTimeKeyForToday() -> String {
-        "screenTimeHours_\(dayFormatter.string(from: Date()))"
-    }
 
     private func clamp(_ value: Double, min lo: Double = 0, max hi: Double = 1) -> Double {
         Swift.min(hi, Swift.max(lo, value))

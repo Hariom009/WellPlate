@@ -10,12 +10,16 @@ import SwiftData
 
 #if canImport(DeviceActivity)
 import DeviceActivity
+import Combine
 #endif
 
 struct StressView: View {
 
     @StateObject var viewModel: StressViewModel
-    @State private var showScreenTimeSheet = false
+    @ObservedObject private var screenTimeManager = ScreenTimeManager.shared
+    @State private var reportRefreshKey = Self.makeReportRefreshKey()
+    @Environment(\.scenePhase) private var scenePhase
+    private let refreshTicker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -42,15 +46,23 @@ struct StressView: View {
             await ScreenTimeManager.shared.requestAuthorization()
             ScreenTimeManager.shared.startMonitoring()
             await viewModel.requestPermissionAndLoad()
+            reportRefreshKey = Self.makeReportRefreshKey()
+            viewModel.refreshScreenTimeOnly()
         }
-        .onAppear { viewModel.refreshDietFactor() }
-        .sheet(isPresented: $showScreenTimeSheet) {
-            ScreenTimeInputSheet(
-                hours: $viewModel.screenTimeHours,
-                autoDetectedHours: ScreenTimeManager.shared.currentAutoDetectedHours
-            ) {
-                viewModel.updateScreenTime(viewModel.screenTimeHours)
-            }
+        .onAppear {
+            viewModel.refreshDietFactor()
+            viewModel.refreshScreenTimeOnly()
+            reportRefreshKey = Self.makeReportRefreshKey()
+        }
+        .onReceive(refreshTicker) { _ in
+            guard viewModel.isAuthorized else { return }
+            reportRefreshKey = Self.makeReportRefreshKey()
+            viewModel.refreshScreenTimeOnly()
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            reportRefreshKey = Self.makeReportRefreshKey()
+            viewModel.refreshScreenTimeOnly()
         }
     }
 
@@ -101,24 +113,24 @@ struct StressView: View {
     @ViewBuilder
     private var screenTimeReportCard: some View {
         #if canImport(DeviceActivity)
-        if ScreenTimeManager.shared.isAuthorized {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: "iphone")
-                        .foregroundColor(.cyan)
-                    Text("Screen Time")
-                        .font(.r(.headline, .semibold))
-                    Spacer()
-                    if viewModel.screenTimeSource == .auto {
-                        Text("Auto")
-                            .font(.r(.caption2, .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(.cyan))
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "iphone")
+                    .foregroundColor(.cyan)
+                Text("Screen Time")
+                    .font(.r(.headline, .semibold))
+                Spacer()
+                if viewModel.screenTimeSource == .auto {
+                    Text("Auto")
+                        .font(.r(.caption2, .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.cyan))
                 }
+            }
 
+            if screenTimeManager.isAuthorized {
                 DeviceActivityReport(
                     .init(rawValue: "TotalActivity"),
                     filter: DeviceActivityFilter(
@@ -130,12 +142,26 @@ struct StressView: View {
                         )
                     )
                 )
-                .frame(height: 80)
+                .id(reportRefreshKey)
+                .frame(minHeight: 60)
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .tint(.cyan)
+                    Text("Waiting for Screen Time permission…")
+                        .font(.r(.caption, .regular))
+                        .foregroundColor(.secondary)
+                }
+                .frame(height: 44)
             }
-            .padding(20)
-            .background(cardBackground)
         }
+        .padding(20)
+        .background(cardBackground)
         #endif
+    }
+
+    private static func makeReportRefreshKey() -> String {
+        String(Int(Date().timeIntervalSince1970 / 60))
     }
 
     // MARK: - Factors Section
@@ -150,9 +176,7 @@ struct StressView: View {
                 StressFactorCardView(factor: viewModel.exerciseFactor)
                 StressFactorCardView(factor: viewModel.sleepFactor)
                 StressFactorCardView(factor: viewModel.dietFactor)
-                StressFactorCardView(factor: viewModel.screenTimeFactor) {
-                    showScreenTimeSheet = true
-                }
+                StressFactorCardView(factor: viewModel.screenTimeFactor)
             }
         }
     }

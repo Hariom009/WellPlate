@@ -4,9 +4,27 @@
 //
 //  Created on 21.02.2026.
 //
+//  NOTE: The DeviceActivityReport extension runs in a privacy sandbox.
+//  It cannot write data (UserDefaults, CoreData, network) back to the main app.
+//  The DeviceActivityReport view is VISUAL ONLY — used to display screen time in the UI.
+//
+//  The only supported way to get a numeric value into the main app is via
+//  DeviceActivityMonitor threshold events, which fire when the user crosses
+//  a usage milestone (every 15 min here) and CAN write to a shared App Group.
 
 import Foundation
 import Combine
+
+enum ScreenTimeAccuracy {
+    case nearestThreshold15m
+    case unavailable
+}
+
+struct ScreenTimeReading {
+    let rawHours: Double
+    let displayRoundedHours: Int
+    let accuracy: ScreenTimeAccuracy
+}
 
 #if canImport(FamilyControls)
 import FamilyControls
@@ -21,6 +39,9 @@ final class ScreenTimeManager: ObservableObject {
     static let appGroupID = "group.com.hariom.health.WellPlate"
     static let thresholdKey = "screenTimeThresholdHours"
     static let thresholdDateKey = "screenTimeThresholdDate"
+    private static let thresholdStartMinutes = 240   // first threshold at 4 hours
+    private static let thresholdIntervalMinutes = 60  // then every 1 hour
+    private static let logPrefix = "[ScreenTimeManager]"
 
     // MARK: - Published State
 
@@ -41,7 +62,6 @@ final class ScreenTimeManager: ObservableObject {
     // MARK: - Init
 
     private init() {
-        // Check if already authorized
         isAuthorized = AuthorizationCenter.shared.authorizationStatus == .approved
     }
 
@@ -60,7 +80,9 @@ final class ScreenTimeManager: ObservableObject {
 
     // MARK: - Monitoring
 
-    /// Schedule daily monitoring with hourly thresholds (1h–12h).
+    /// Schedule daily monitoring with thresholds starting at 4h, then every 1h up to 12h.
+    /// When the user crosses each threshold, DeviceActivityMonitor fires
+    /// and writes the value to the shared App Group UserDefaults.
     func startMonitoring() {
         guard isAuthorized else { return }
 
@@ -71,11 +93,13 @@ final class ScreenTimeManager: ObservableObject {
         )
 
         var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
-        for hour in 1...12 {
-            let name = DeviceActivityEvent.Name("threshold_\(hour)h")
+        var minutes = Self.thresholdStartMinutes
+        while minutes <= 720 { // 4h, 5h, 6h … up to 12h
+            let name = DeviceActivityEvent.Name("threshold_\(minutes)m")
             events[name] = DeviceActivityEvent(
-                threshold: DateComponents(hour: hour)
+                threshold: DateComponents(hour: minutes / 60, minute: minutes % 60)
             )
+            minutes += Self.thresholdIntervalMinutes
         }
 
         do {
@@ -85,7 +109,7 @@ final class ScreenTimeManager: ObservableObject {
                 events: events
             )
         } catch {
-            print("[ScreenTimeManager] Failed to start monitoring: \(error)")
+            print("\(Self.logPrefix) Failed to start monitoring: \(error)")
         }
     }
 
@@ -93,18 +117,58 @@ final class ScreenTimeManager: ObservableObject {
         center.stopMonitoring([.init("daily_screen_time")])
     }
 
-    // MARK: - Read Shared Data
+    // MARK: - Read Threshold Data
 
-    /// Read the latest threshold hours from App Group UserDefaults (written by the monitor extension).
-    /// Returns `nil` if no data for today or no App Group access.
-    var currentAutoDetectedHours: Double? {
+    /// Returns the latest threshold-based reading for today from the shared App Group.
+    /// Resolution: nearest 15-minute interval (±7.5 min accuracy).
+    /// Returns nil if the user hasn't crossed the first 15-minute threshold yet today.
+    var currentAutoDetectedReading: ScreenTimeReading? {
         guard let defaults = UserDefaults(suiteName: Self.appGroupID) else { return nil }
-        let storedDate = defaults.string(forKey: Self.thresholdDateKey) ?? ""
-        let today = Self.dayFormatter.string(from: Date())
-        guard storedDate == today else { return nil }
-        guard defaults.object(forKey: Self.thresholdKey) != nil else { return nil }
-        let hours = defaults.double(forKey: Self.thresholdKey)
-        return hours
+
+        let today = Self.todayDateString()
+        let storedDate = defaults.string(forKey: Self.thresholdDateKey)
+
+        #if DEBUG
+        let rawThreshold: String = defaults.object(forKey: Self.thresholdKey) != nil
+            ? String(defaults.double(forKey: Self.thresholdKey))
+            : "nil"
+        print("\(Self.logPrefix) snapshot thresholdDate=\(storedDate ?? "nil") thresholdRaw=\(rawThreshold) today=\(today)")
+        #endif
+
+        // Clean stale data from a previous day
+        if let storedDate, storedDate != today {
+            defaults.removeObject(forKey: Self.thresholdKey)
+            defaults.removeObject(forKey: Self.thresholdDateKey)
+            #if DEBUG
+            print("\(Self.logPrefix) cleaned stale threshold from \(storedDate)")
+            #endif
+            return nil
+        }
+
+        guard let storedDate, storedDate == today,
+              defaults.object(forKey: Self.thresholdKey) != nil else {
+            #if DEBUG
+            print("\(Self.logPrefix) no threshold data for today yet (user < 15 min usage)")
+            #endif
+            return nil
+        }
+
+        let hours = max(0, defaults.double(forKey: Self.thresholdKey))
+        guard hours > 0 else { return nil }
+
+        #if DEBUG
+        print("\(Self.logPrefix) fetched thresholdHours=\(hours)")
+        #endif
+
+        return ScreenTimeReading(
+            rawHours: hours,
+            displayRoundedHours: Int(hours.rounded()),
+            accuracy: .nearestThreshold15m
+        )
+    }
+
+    var currentAutoDetectedHours: Int? {
+        currentAutoDetectedReading?.displayRoundedHours
     }
 
     // MARK: - Helpers
@@ -132,7 +196,8 @@ final class ScreenTimeManager: ObservableObject {
     func startMonitoring() { /* no-op */ }
     func stopMonitoring() { /* no-op */ }
 
-    var currentAutoDetectedHours: Double? { nil }
+    var currentAutoDetectedReading: ScreenTimeReading? { nil }
+    var currentAutoDetectedHours: Int? { nil }
 
     static func todayDateString() -> String {
         let f = DateFormatter()
