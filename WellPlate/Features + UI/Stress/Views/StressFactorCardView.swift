@@ -45,6 +45,12 @@ struct StressFactorCardView: View {
                 Text(" / 25")
                     .font(.r(.caption, .medium))
                     .foregroundColor(.secondary)
+
+                if onTap != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.4))
+                }
             }
 
             // Progress bar

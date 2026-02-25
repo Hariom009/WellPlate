@@ -32,6 +32,31 @@ final class StressViewModel: ObservableObject {
     @Published var errorMessage: String? = nil
     @Published var screenTimeSource: ScreenTimeSource = .none
 
+    // MARK: - Today's Vitals (display-only)
+
+    @Published var todayHeartRate: Double? = nil
+    @Published var todayRestingHR: Double? = nil
+    @Published var todayHRV: Double? = nil
+    @Published var todaySystolicBP: Double? = nil
+    @Published var todayDiastolicBP: Double? = nil
+    @Published var todayRespiratoryRate: Double? = nil
+
+    // MARK: - 30-Day History
+
+    @Published var stepsHistory: [DailyMetricSample] = []
+    @Published var energyHistory: [DailyMetricSample] = []
+    @Published var sleepHistory: [DailySleepSummary] = []
+    @Published var heartRateHistory: [DailyMetricSample] = []
+    @Published var restingHRHistory: [DailyMetricSample] = []
+    @Published var hrvHistory: [DailyMetricSample] = []
+    @Published var systolicBPHistory: [DailyMetricSample] = []
+    @Published var diastolicBPHistory: [DailyMetricSample] = []
+    @Published var respiratoryRateHistory: [DailyMetricSample] = []
+
+    // MARK: - Diet Log Cache
+
+    @Published var currentDayLogs: [FoodLogEntry] = []
+
     // MARK: - Computed
 
     /// Stress total 0–100.
@@ -53,6 +78,29 @@ final class StressViewModel: ObservableObject {
     /// Top 2 factors contributing most to stress, ranked by stress contribution.
     var topStressors: [StressFactorResult] {
         allFactors.sorted { $0.stressContribution > $1.stressContribution }.prefix(2).map { $0 }
+    }
+
+    /// Returns the 30-day history array for a given vital metric.
+    func vitalHistory(for metric: VitalMetric) -> [DailyMetricSample] {
+        switch metric {
+        case .heartRate:        return heartRateHistory
+        case .restingHeartRate: return restingHRHistory
+        case .hrv:              return hrvHistory
+        case .systolicBP:       return systolicBPHistory
+        case .diastolicBP:      return diastolicBPHistory
+        case .respiratoryRate:  return respiratoryRateHistory
+        }
+    }
+
+    /// Min / max / avg total sleep hours over the 30-day history.
+    var sleepStats: (min: Double, max: Double, avg: Double) {
+        let values = sleepHistory.map(\.totalHours)
+        guard !values.isEmpty else { return (0, 0, 0) }
+        return (
+            values.min()!,
+            values.max()!,
+            values.reduce(0, +) / Double(values.count)
+        )
     }
 
     // MARK: - Manual Screen Time Persistence
@@ -195,6 +243,38 @@ final class StressViewModel: ObservableObject {
         log("   Total stress : \(fmt2(totalScore))/100  → Level: \(stressLevel.label)")
         log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         #endif
+
+        // Fetch 30-day histories for detail views and vitals display
+        let thirtyDayStart = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+        let thirtyDayRange = DateInterval(start: thirtyDayStart, end: now)
+
+        async let stepsHist  = fetchStepsHistorySafely(range: thirtyDayRange)
+        async let energyHist = fetchEnergyHistorySafely(range: thirtyDayRange)
+        async let sleepHist  = fetchSleepHistorySafely(range: thirtyDayRange)
+        async let hrHist     = fetchHRHistorySafely(range: thirtyDayRange)
+        async let restHist   = fetchRestingHRHistorySafely(range: thirtyDayRange)
+        async let hrvHist    = fetchHRVHistorySafely(range: thirtyDayRange)
+        async let sysBPHist  = fetchSysBPHistorySafely(range: thirtyDayRange)
+        async let diasBPHist = fetchDiasBPHistorySafely(range: thirtyDayRange)
+        async let rrHist     = fetchRRHistorySafely(range: thirtyDayRange)
+
+        stepsHistory           = await stepsHist
+        energyHistory          = await energyHist
+        sleepHistory           = await sleepHist
+        heartRateHistory       = await hrHist
+        restingHRHistory       = await restHist
+        hrvHistory             = await hrvHist
+        systolicBPHistory      = await sysBPHist
+        diastolicBPHistory     = await diasBPHist
+        respiratoryRateHistory = await rrHist
+
+        // Extract today's vitals values
+        todayHeartRate       = heartRateHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
+        todayRestingHR       = restingHRHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
+        todayHRV             = hrvHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
+        todaySystolicBP      = systolicBPHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
+        todayDiastolicBP     = diastolicBPHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
+        todayRespiratoryRate = respiratoryRateHistory.first(where: { Calendar.current.isDateInToday($0.date) })?.value
     }
 
     func refreshDietFactor() {
@@ -205,6 +285,7 @@ final class StressViewModel: ObservableObject {
             }
         )
         let logs = (try? modelContext.fetch(descriptor)) ?? []
+        currentDayLogs = logs
         let score = computeDietScore(logs: logs)
         dietFactor = buildDietFactor(score: score, logs: logs)
 
@@ -242,6 +323,44 @@ final class StressViewModel: ObservableObject {
 
     private func fetchSleepSafely(for range: DateInterval) async -> DailySleepSummary? {
         try? await healthService.fetchDailySleepSummaries(for: range).last
+    }
+
+    // MARK: - 30-Day History Fetchers
+
+    private func fetchStepsHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchSteps(for: range)) ?? []
+    }
+
+    private func fetchEnergyHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchActiveEnergy(for: range)) ?? []
+    }
+
+    private func fetchSleepHistorySafely(range: DateInterval) async -> [DailySleepSummary] {
+        (try? await healthService.fetchDailySleepSummaries(for: range)) ?? []
+    }
+
+    private func fetchHRHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchHeartRate(for: range)) ?? []
+    }
+
+    private func fetchRestingHRHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchRestingHeartRate(for: range)) ?? []
+    }
+
+    private func fetchHRVHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchHRV(for: range)) ?? []
+    }
+
+    private func fetchSysBPHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchBloodPressureSystolic(for: range)) ?? []
+    }
+
+    private func fetchDiasBPHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchBloodPressureDiastolic(for: range)) ?? []
+    }
+
+    private func fetchRRHistorySafely(range: DateInterval) async -> [DailyMetricSample] {
+        (try? await healthService.fetchRespiratoryRate(for: range)) ?? []
     }
 
     // MARK: - Score Engines

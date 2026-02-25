@@ -36,7 +36,9 @@ final class HealthKitService: HealthKitServiceProtocol {
     private var readTypes: Set<HKObjectType> {
         var types = Set<HKObjectType>()
         let quantityIDs: [HKQuantityTypeIdentifier] = [
-            .stepCount, .activeEnergyBurned, .heartRate, .dietaryWater
+            .stepCount, .activeEnergyBurned, .heartRate, .dietaryWater,
+            .restingHeartRate, .heartRateVariabilitySDNN,
+            .bloodPressureSystolic, .bloodPressureDiastolic, .respiratoryRate
         ]
         quantityIDs.compactMap { HKQuantityType.quantityType(forIdentifier: $0) }
                    .forEach { types.insert($0) }
@@ -158,6 +160,41 @@ final class HealthKitService: HealthKitServiceProtocol {
             )
         }
         .sorted { $0.date < $1.date }
+    }
+
+    func fetchRestingHeartRate(for range: DateInterval) async throws -> [DailyMetricSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) else {
+            throw HealthKitError.typeNotAvailable
+        }
+        return try await fetchDailyAvg(type: type, unit: HKUnit(from: "count/min"), range: range)
+    }
+
+    func fetchHRV(for range: DateInterval) async throws -> [DailyMetricSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) else {
+            throw HealthKitError.typeNotAvailable
+        }
+        return try await fetchDailyAvg(type: type, unit: HKUnit(from: "ms"), range: range)
+    }
+
+    func fetchBloodPressureSystolic(for range: DateInterval) async throws -> [DailyMetricSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) else {
+            throw HealthKitError.typeNotAvailable
+        }
+        return try await fetchDailyAvg(type: type, unit: .millimeterOfMercury(), range: range)
+    }
+
+    func fetchBloodPressureDiastolic(for range: DateInterval) async throws -> [DailyMetricSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic) else {
+            throw HealthKitError.typeNotAvailable
+        }
+        return try await fetchDailyAvg(type: type, unit: .millimeterOfMercury(), range: range)
+    }
+
+    func fetchRespiratoryRate(for range: DateInterval) async throws -> [DailyMetricSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .respiratoryRate) else {
+            throw HealthKitError.typeNotAvailable
+        }
+        return try await fetchDailyAvg(type: type, unit: HKUnit(from: "count/min"), range: range)
     }
 
     // MARK: - Private Helpers

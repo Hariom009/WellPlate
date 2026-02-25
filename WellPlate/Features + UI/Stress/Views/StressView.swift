@@ -9,12 +9,36 @@ import SwiftUI
 import SwiftData
 import Combine
 
+// MARK: - Sheet Enum
+
+enum StressSheet: Identifiable {
+    case exercise
+    case sleep
+    case diet
+    case screenTimeDetail
+    case screenTimeEntry
+    case vital(VitalMetric)
+
+    var id: String {
+        switch self {
+        case .exercise:         return "exercise"
+        case .sleep:            return "sleep"
+        case .diet:             return "diet"
+        case .screenTimeDetail: return "screenTimeDetail"
+        case .screenTimeEntry:  return "screenTimeEntry"
+        case .vital(let m):     return "vital_\(m.id)"
+        }
+    }
+}
+
+// MARK: - StressView
+
 struct StressView: View {
 
     @StateObject var viewModel: StressViewModel
     @ObservedObject private var screenTimeManager = ScreenTimeManager.shared
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showScreenTimeSheet = false
+    @State private var activeSheet: StressSheet? = nil
     @State private var pendingManualHours: Double = 0
     private let refreshTicker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
@@ -57,12 +81,40 @@ struct StressView: View {
             guard phase == .active else { return }
             viewModel.refreshScreenTimeOnly()
         }
-        .sheet(isPresented: $showScreenTimeSheet) {
-            ScreenTimeInputSheet(
-                hours: $pendingManualHours,
-                autoDetectedHours: ScreenTimeManager.shared.currentAutoDetectedReading.map { Double($0.displayRoundedHours) }
-            ) {
-                viewModel.setManualScreenTime(pendingManualHours)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .exercise:
+                ExerciseDetailView(
+                    stepsSamples: viewModel.stepsHistory,
+                    energySamples: viewModel.energyHistory
+                )
+            case .sleep:
+                SleepDetailView(
+                    summaries: viewModel.sleepHistory,
+                    stats: viewModel.sleepStats
+                )
+            case .diet:
+                DietDetailView(
+                    factor: viewModel.dietFactor,
+                    todayLogs: viewModel.currentDayLogs
+                )
+            case .screenTimeDetail:
+                ScreenTimeDetailView(
+                    factor: viewModel.screenTimeFactor,
+                    source: viewModel.screenTimeSource
+                )
+            case .screenTimeEntry:
+                ScreenTimeInputSheet(
+                    hours: $pendingManualHours,
+                    autoDetectedHours: ScreenTimeManager.shared.currentAutoDetectedReading.map { Double($0.displayRoundedHours) }
+                ) {
+                    viewModel.setManualScreenTime(pendingManualHours)
+                }
+            case .vital(let metric):
+                VitalDetailView(
+                    metric: metric,
+                    samples: viewModel.vitalHistory(for: metric)
+                )
             }
         }
     }
@@ -75,6 +127,7 @@ struct StressView: View {
                 gaugeCard
                 screenTimeReportCard
                 factorsSection
+                vitalsSection
                 insightsCard
             }
             .padding(.horizontal, 16)
@@ -143,6 +196,13 @@ struct StressView: View {
                 case .none:
                     EmptyView()
                 }
+                Button {
+                    activeSheet = .screenTimeDetail
+                } label: {
+                    Text("Details →")
+                        .font(.r(.caption, .medium))
+                        .foregroundColor(.cyan)
+                }
             }
 
             // Main time display
@@ -166,7 +226,7 @@ struct StressView: View {
                 case .manual:
                     Button {
                         pendingManualHours = viewModel.currentManualHours
-                        showScreenTimeSheet = true
+                        activeSheet = .screenTimeEntry
                     } label: {
                         Text(String(format: "%.1f", viewModel.currentManualHours))
                             .font(.system(size: 48, weight: .bold, design: .rounded))
@@ -184,7 +244,7 @@ struct StressView: View {
                 case .none:
                     Button {
                         pendingManualHours = 0
-                        showScreenTimeSheet = true
+                        activeSheet = .screenTimeEntry
                     } label: {
                         HStack(spacing: 6) {
                             Text("< 15 min")
@@ -247,12 +307,97 @@ struct StressView: View {
                 .padding(.leading, 4)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                StressFactorCardView(factor: viewModel.exerciseFactor)
-                StressFactorCardView(factor: viewModel.sleepFactor)
-                StressFactorCardView(factor: viewModel.dietFactor)
-                StressFactorCardView(factor: viewModel.screenTimeFactor)
+                StressFactorCardView(factor: viewModel.exerciseFactor, onTap: { activeSheet = .exercise })
+                StressFactorCardView(factor: viewModel.sleepFactor,    onTap: { activeSheet = .sleep })
+                StressFactorCardView(factor: viewModel.dietFactor,     onTap: { activeSheet = .diet })
+                StressFactorCardView(factor: viewModel.screenTimeFactor, onTap: { activeSheet = .screenTimeDetail })
             }
         }
+    }
+
+    // MARK: - Vitals Section
+
+    private var vitalsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Vitals")
+                .font(.r(.headline, .semibold))
+                .padding(.leading, 4)
+
+            VStack(spacing: 10) {
+                StressVitalCardView(
+                    metric: .heartRate,
+                    todayValue: viewModel.todayHeartRate,
+                    onTap: { activeSheet = .vital(.heartRate) }
+                )
+                StressVitalCardView(
+                    metric: .restingHeartRate,
+                    todayValue: viewModel.todayRestingHR,
+                    onTap: { activeSheet = .vital(.restingHeartRate) }
+                )
+                StressVitalCardView(
+                    metric: .hrv,
+                    todayValue: viewModel.todayHRV,
+                    onTap: { activeSheet = .vital(.hrv) }
+                )
+
+                // Blood pressure: two half-width cards side by side
+                HStack(spacing: 10) {
+                    bpHalfCard(metric: .systolicBP, value: viewModel.todaySystolicBP)
+                    bpHalfCard(metric: .diastolicBP, value: viewModel.todayDiastolicBP)
+                }
+
+                StressVitalCardView(
+                    metric: .respiratoryRate,
+                    todayValue: viewModel.todayRespiratoryRate,
+                    onTap: { activeSheet = .vital(.respiratoryRate) }
+                )
+            }
+        }
+    }
+
+    private func bpHalfCard(metric: VitalMetric, value: Double?) -> some View {
+        Button {
+            activeSheet = .vital(metric)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: metric.systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(metric.accentColor)
+                    Text(metric == .systolicBP ? "Systolic" : "Diastolic")
+                        .font(.r(.caption, .semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary.opacity(0.4))
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    if let v = value {
+                        Text(String(format: "%.0f", v))
+                            .font(.r(22, .bold))
+                            .foregroundColor(metric.accentColor)
+                            .monospacedDigit()
+                    } else {
+                        Text("—")
+                            .font(.r(22, .bold))
+                            .foregroundColor(.secondary)
+                    }
+                    Text(metric.unit)
+                        .font(.r(.caption2, .regular))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+                    .appShadow(radius: 10, y: 4)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Insights Card
@@ -303,22 +448,18 @@ struct StressView: View {
     private func tipForFactor(_ factor: StressFactorResult) -> String {
         switch factor.title {
         case "Exercise":
-            // Low score = low activity = bad
             return factor.score < 10
                 ? "A 20-minute walk can significantly reduce stress hormones."
                 : "Keep moving — your activity level is helping!"
         case "Sleep":
-            // Low score = poor sleep = bad
             return factor.score < 10
                 ? "Aim for 7–9 hours tonight. Avoid screens before bed."
                 : "Your sleep is contributing to lower stress."
         case "Diet":
-            // Low score = poor nutrition = bad
             return factor.score < 10
                 ? "Try adding more protein and fiber to your meals today."
                 : "Good nutritional balance today!"
         case "Screen Time":
-            // High score = high usage = bad
             return factor.score > 15
                 ? "Take a break from your phone — try reading or a short walk."
                 : "Nice screen time management!"

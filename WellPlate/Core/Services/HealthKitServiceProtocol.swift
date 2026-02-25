@@ -33,4 +33,19 @@ protocol HealthKitServiceProtocol {
 
     /// Daily dietary water (litres) sums over the given interval.
     func fetchWater(for range: DateInterval) async throws -> [DailyMetricSample]
+
+    /// Daily resting heart rate (BPM) over the given interval.
+    func fetchRestingHeartRate(for range: DateInterval) async throws -> [DailyMetricSample]
+
+    /// Daily HRV (SDNN, ms) over the given interval.
+    func fetchHRV(for range: DateInterval) async throws -> [DailyMetricSample]
+
+    /// Daily systolic blood pressure (mmHg) over the given interval.
+    func fetchBloodPressureSystolic(for range: DateInterval) async throws -> [DailyMetricSample]
+
+    /// Daily diastolic blood pressure (mmHg) over the given interval.
+    func fetchBloodPressureDiastolic(for range: DateInterval) async throws -> [DailyMetricSample]
+
+    /// Daily respiratory rate (breaths/min) over the given interval.
+    func fetchRespiratoryRate(for range: DateInterval) async throws -> [DailyMetricSample]
 }
