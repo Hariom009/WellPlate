@@ -67,4 +67,19 @@ enum VitalMetric: String, CaseIterable, Identifiable {
         case .respiratoryRate:  return false
         }
     }
+
+    func statusColor(for value: Double) -> Color {
+        switch self {
+        case .hrv:
+            return value >= 30 ? .green : value >= 20 ? .yellow : .red
+        case .heartRate, .restingHeartRate:
+            return (value >= 50 && value <= 90) ? .green : (value >= 40 && value <= 100) ? .yellow : .red
+        case .systolicBP:
+            return value < 120 ? .green : value < 140 ? .yellow : .red
+        case .diastolicBP:
+            return value < 80  ? .green : value < 90  ? .yellow : .red
+        case .respiratoryRate:
+            return (value >= 12 && value <= 18) ? .green : (value >= 10 && value <= 20) ? .yellow : .red
+        }
+    }
 }

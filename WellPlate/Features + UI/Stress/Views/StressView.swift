@@ -125,10 +125,8 @@ struct StressView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 20) {
                 gaugeCard
-                screenTimeReportCard
                 factorsSection
                 vitalsSection
-                insightsCard
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -166,139 +164,22 @@ struct StressView: View {
         .background(cardBackground)
     }
 
-    // MARK: - Screen Time Report Card
+    // MARK: - Factors Section
 
-    private var screenTimeReportCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header
-            HStack {
-                Image(systemName: "iphone")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.cyan)
-                Text("Screen Time")
-                    .font(.r(.headline, .semibold))
-                Spacer()
-                switch viewModel.screenTimeSource {
-                case .auto:
-                    Text("Live")
-                        .font(.r(.caption2, .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(.cyan))
-                case .manual:
-                    Text("Manual")
-                        .font(.r(.caption2, .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(.orange))
-                case .none:
-                    EmptyView()
-                }
-                Button {
-                    activeSheet = .screenTimeDetail
-                } label: {
-                    Text("Details →")
-                        .font(.r(.caption, .medium))
-                        .foregroundColor(.cyan)
-                }
-            }
-
-            // Main time display
-            let factor = viewModel.screenTimeFactor
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                switch viewModel.screenTimeSource {
-                case .auto:
-                    if let reading = ScreenTimeManager.shared.currentAutoDetectedReading {
-                        Text("\(reading.displayRoundedHours)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(LinearGradient(
-                                colors: [.cyan, .blue],
-                                startPoint: .leading, endPoint: .trailing
-                            ))
-                        Text("h today")
-                            .font(.r(.subheadline, .medium))
-                            .foregroundColor(.secondary)
-                            .padding(.bottom, 6)
-                    }
-                case .manual:
-                    Button {
-                        pendingManualHours = viewModel.currentManualHours
-                        activeSheet = .screenTimeEntry
-                    } label: {
-                        Text(String(format: "%.1f", viewModel.currentManualHours))
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(LinearGradient(
-                                colors: [.cyan, .blue],
-                                startPoint: .leading, endPoint: .trailing
-                            ))
-                    }
-                    .buttonStyle(.plain)
-                    Text("h today")
-                        .font(.r(.subheadline, .medium))
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 6)
-                case .none:
-                    Button {
-                        pendingManualHours = 0
-                        activeSheet = .screenTimeEntry
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text("< 15 min")
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .foregroundColor(.cyan)
-                            Image(systemName: "pencil.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundColor(.cyan.opacity(0.6))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Text("today")
-                        .font(.r(.subheadline, .medium))
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 4)
-                }
-                Spacer()
-                // Score badge
-                VStack(spacing: 2) {
-                    Text(String(format: "%.0f", factor.score))
-                        .font(.r(22, .bold))
-                        .foregroundColor(factor.accentColor)
-                    + Text(" /25")
-                        .font(.r(.caption, .medium))
-                        .foregroundColor(.secondary)
-                    Text("stress pts")
-                        .font(.r(.caption2, .regular))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color(.systemGray5))
-                        .frame(height: 6)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(factor.accentColor)
-                        .frame(width: max(0, geo.size.width * factor.progress), height: 6)
-                }
-            }
-            .frame(height: 6)
-
-            // Detail label
-            Text(factor.detailText)
-                .font(.r(.caption, .regular))
-                .foregroundColor(.secondary)
-        }
-        .padding(20)
-        .background(cardBackground)
+    private struct FactorItem {
+        let factor: StressFactorResult
+        let sheet: StressSheet
     }
 
-    // MARK: - Factors Section
+    private var sortedFactors: [FactorItem] {
+        [
+            FactorItem(factor: viewModel.exerciseFactor,   sheet: .exercise),
+            FactorItem(factor: viewModel.sleepFactor,      sheet: .sleep),
+            FactorItem(factor: viewModel.dietFactor,       sheet: .diet),
+            FactorItem(factor: viewModel.screenTimeFactor, sheet: .screenTimeDetail),
+        ]
+        .sorted { $0.factor.stressContribution > $1.factor.stressContribution }
+    }
 
     private var factorsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -306,11 +187,10 @@ struct StressView: View {
                 .font(.r(.headline, .semibold))
                 .padding(.leading, 4)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                StressFactorCardView(factor: viewModel.exerciseFactor, onTap: { activeSheet = .exercise })
-                StressFactorCardView(factor: viewModel.sleepFactor,    onTap: { activeSheet = .sleep })
-                StressFactorCardView(factor: viewModel.dietFactor,     onTap: { activeSheet = .diet })
-                StressFactorCardView(factor: viewModel.screenTimeFactor, onTap: { activeSheet = .screenTimeDetail })
+            VStack(spacing: 12) {
+                ForEach(sortedFactors, id: \.factor.id) { item in
+                    StressFactorCardView(factor: item.factor, onTap: { activeSheet = item.sheet })
+                }
             }
         }
     }
@@ -340,7 +220,12 @@ struct StressView: View {
                     onTap: { activeSheet = .vital(.hrv) }
                 )
 
-                // Blood pressure: two half-width cards side by side
+                // Blood pressure: sub-label + two half-width cards side by side
+                Text("Blood Pressure")
+                    .font(.r(.caption, .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 4)
+
                 HStack(spacing: 10) {
                     bpHalfCard(metric: .systolicBP, value: viewModel.todaySystolicBP)
                     bpHalfCard(metric: .diastolicBP, value: viewModel.todayDiastolicBP)
@@ -379,14 +264,21 @@ struct StressView: View {
                             .font(.r(22, .bold))
                             .foregroundColor(metric.accentColor)
                             .monospacedDigit()
+                        Text(metric.unit)
+                            .font(.r(.caption2, .regular))
+                            .foregroundColor(.secondary)
+                        Circle()
+                            .fill(metric.statusColor(for: v))
+                            .frame(width: 8, height: 8)
+                            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
                     } else {
                         Text("—")
                             .font(.r(22, .bold))
                             .foregroundColor(.secondary)
+                        Text(metric.unit)
+                            .font(.r(.caption2, .regular))
+                            .foregroundColor(.secondary)
                     }
-                    Text(metric.unit)
-                        .font(.r(.caption2, .regular))
-                        .foregroundColor(.secondary)
                 }
             }
             .padding(14)
@@ -398,74 +290,6 @@ struct StressView: View {
             )
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Insights Card
-
-    private var insightsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Image(systemName: "lightbulb.fill")
-                    .foregroundColor(.yellow)
-                Text("What's Affecting You?")
-                    .font(.r(.headline, .semibold))
-            }
-
-            ForEach(viewModel.topStressors) { factor in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: factor.icon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(factor.accentColor)
-                        .frame(width: 24, height: 24)
-                        .background(factor.accentColor.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(factor.title)
-                            .font(.r(.subheadline, .semibold))
-                        Text(tipForFactor(factor))
-                            .font(.r(.caption, .regular))
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    Spacer()
-
-                    Text(String(format: "%.0f", factor.score))
-                        .font(.r(.subheadline, .bold))
-                        .foregroundColor(factor.accentColor)
-                    +
-                    Text("/25")
-                        .font(.r(.caption, .medium))
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(20)
-        .background(cardBackground)
-    }
-
-    private func tipForFactor(_ factor: StressFactorResult) -> String {
-        switch factor.title {
-        case "Exercise":
-            return factor.score < 10
-                ? "A 20-minute walk can significantly reduce stress hormones."
-                : "Keep moving — your activity level is helping!"
-        case "Sleep":
-            return factor.score < 10
-                ? "Aim for 7–9 hours tonight. Avoid screens before bed."
-                : "Your sleep is contributing to lower stress."
-        case "Diet":
-            return factor.score < 10
-                ? "Try adding more protein and fiber to your meals today."
-                : "Good nutritional balance today!"
-        case "Screen Time":
-            return factor.score > 15
-                ? "Take a break from your phone — try reading or a short walk."
-                : "Nice screen time management!"
-        default:
-            return ""
-        }
     }
 
     // MARK: - State Views

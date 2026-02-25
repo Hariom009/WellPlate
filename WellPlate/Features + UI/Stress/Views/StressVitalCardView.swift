@@ -44,7 +44,7 @@ struct StressVitalCardView: View {
 
             Spacer()
 
-            // Value + unit + chevron
+            // Value + unit + status dot + chevron
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 if let value = todayValue {
                     Text(String(format: "%.0f", value))
@@ -54,6 +54,10 @@ struct StressVitalCardView: View {
                     Text(metric.unit)
                         .font(.r(.caption, .medium))
                         .foregroundColor(.secondary)
+                    Circle()
+                        .fill(metric.statusColor(for: value))
+                        .frame(width: 8, height: 8)
+                        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
                 } else {
                     Text("—")
                         .font(.r(17, .bold))
