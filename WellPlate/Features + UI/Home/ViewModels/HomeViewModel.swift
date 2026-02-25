@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Combine
+import WidgetKit
 
 @MainActor
 final class HomeViewModel: ObservableObject {
@@ -45,6 +46,7 @@ final class HomeViewModel: ObservableObject {
                     confidence: cached.confidence
                 )
                 try modelContext.save()
+                refreshWidget(for: day)
                 return
             }
 
@@ -61,6 +63,7 @@ final class HomeViewModel: ObservableObject {
             insertLog(from: result, day: day, typedName: trimmed, key: key)
 
             try modelContext.save()
+            refreshWidget(for: day)
         } catch {
             showErrorMessage("Failed to log food. Please try again.")
         }
@@ -133,5 +136,36 @@ final class HomeViewModel: ObservableObject {
     private func showErrorMessage(_ message: String) {
         errorMessage = message
         showError = true
+    }
+
+    // MARK: - Widget Refresh
+
+    /// Aggregates today's food logs, writes to AppGroup UserDefaults, then tells
+    /// WidgetKit to reload the food widget timeline.
+    private func refreshWidget(for day: Date) {
+        let descriptor = FetchDescriptor<FoodLogEntry>(
+            predicate: #Predicate { $0.day == day }
+        )
+        guard let entries = try? modelContext.fetch(descriptor) else { return }
+
+        let recentFoods = entries
+            .sorted { $0.createdAt > $1.createdAt }
+            .prefix(3)
+            .map { WidgetFoodItem(id: $0.id, name: $0.foodName, calories: $0.calories) }
+
+        let widgetData = WidgetFoodData(
+            totalCalories: entries.reduce(0) { $0 + $1.calories },
+            totalProtein:  entries.reduce(0.0) { $0 + $1.protein },
+            totalCarbs:    entries.reduce(0.0) { $0 + $1.carbs },
+            totalFat:      entries.reduce(0.0) { $0 + $1.fat },
+            recentFoods:   Array(recentFoods),
+            calorieGoal:   2000,
+            proteinGoal:   60,
+            carbsGoal:     225,
+            fatGoal:       65,
+            lastUpdated:   .now
+        )
+        widgetData.save()
+        WidgetCenter.shared.reloadTimelines(ofKind: "com.hariom.wellplate.foodWidget")
     }
 }

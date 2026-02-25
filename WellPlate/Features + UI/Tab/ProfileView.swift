@@ -1,40 +1,622 @@
-//
-//  ProfileView.swift
-//  WellPlate
-//
-//  Created by Hari's Mac on 20.02.2026.
-//
-
 import SwiftUI
+import WidgetKit
 
-/// Placeholder for the Profile screen.
-struct ProfilePlaceholderView: View {
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(.systemGroupedBackground)
-                    .ignoresSafeArea()
+// MARK: - Widget size selection
 
-                VStack(spacing: 16) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 56))
-                        .foregroundColor(.orange.opacity(0.8))
+enum FoodWidgetSize: String, CaseIterable, Identifiable {
+    case small  = "Small"
+    case medium = "Medium"
+    case large  = "Large"
 
-                    Text("Profile")
-                        .font(.r(.title2, .bold))
+    var id: String { rawValue }
 
-                    Text("Goals, preferences & settings\ncoming soon.")
-                        .font(.r(.subheadline, .regular))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .padding()
-            }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.large)
+    var systemImageName: String {
+        switch self {
+        case .small:  return "square.fill"
+        case .medium: return "rectangle.fill"
+        case .large:  return "rectangle.portrait.fill"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .small:  return "Calorie ring + quick add"
+        case .medium: return "Ring + macro bars"
+        case .large:  return "Full log + recent foods"
+        }
+    }
+
+    /// Aspect ratio of the iOS widget for visual preview
+    var aspectRatio: CGFloat {
+        switch self {
+        case .small:  return 1.0
+        case .medium: return 2.12
+        case .large:  return 1.0   // large is roughly square but taller — use 0.95
+        }
+    }
+
+    var previewHeight: CGFloat {
+        switch self {
+        case .small:  return 130
+        case .medium: return 130
+        case .large:  return 260
         }
     }
 }
+
+// MARK: - Profile View
+
+struct ProfilePlaceholderView: View {
+    @State private var selectedSize: FoodWidgetSize = .medium
+    @State private var isWidgetInstalled            = false
+    @State private var showInstructions             = false
+    @Namespace private var sizeNamespace
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // ── Profile placeholder ──────────────────────────
+                    VStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 56))
+                            .foregroundStyle(.orange.opacity(0.85))
+
+                        Text("Profile")
+                            .font(.r(.title2, .bold))
+
+                        Text("Goals, preferences & settings\ncoming soon.")
+                            .font(.r(.subheadline, .regular))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 16)
+
+                    // ── Widget setup card ────────────────────────────
+                    WidgetSetupCard(
+                        selectedSize:      $selectedSize,
+                        isInstalled:       isWidgetInstalled,
+                        namespace:         sizeNamespace,
+                        onAddTapped:       { showInstructions = true }
+                    )
+                    .padding(.horizontal, 16)
+                }
+                .padding(.bottom, 32)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.large)
+            .onAppear(perform: checkWidgetStatus)
+            .sheet(isPresented: $showInstructions) {
+                WidgetInstructionsSheet(size: selectedSize)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    private func checkWidgetStatus() {
+        WidgetCenter.shared.getCurrentConfigurations { result in
+            DispatchQueue.main.async {
+                if case .success(let infos) = result {
+                    isWidgetInstalled = infos.contains {
+                        $0.kind == "com.hariom.wellplate.foodWidget"
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Widget Setup Card
+
+private struct WidgetSetupCard: View {
+    @Binding var selectedSize: FoodWidgetSize
+    let isInstalled:  Bool
+    let namespace:    Namespace.ID
+    let onAddTapped:  () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+
+            // Header row
+            HStack(spacing: 10) {
+                Image(systemName: "rectangle.3.group.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                Text("Food Widget")
+                    .font(.r(.headline, .semibold))
+                Spacer()
+                // Status badge
+                StatusBadge(isInstalled: isInstalled)
+            }
+
+            // Size picker pills
+            HStack(spacing: 8) {
+                ForEach(FoodWidgetSize.allCases) { size in
+                    SizePill(
+                        size:       size,
+                        isSelected: selectedSize == size,
+                        namespace:  namespace
+                    )
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
+                            selectedSize = size
+                        }
+                    }
+                }
+            }
+
+            // Live widget preview
+            WidgetPreview(size: selectedSize)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .animation(.spring(response: 0.38, dampingFraction: 0.8), value: selectedSize)
+                .id(selectedSize)   // forces re-render + transition on size change
+
+            // Description
+            Text(selectedSize.description)
+                .font(.r(.subheadline, .regular))
+                .foregroundStyle(.secondary)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: selectedSize)
+
+            // Add button
+            Button(action: onAddTapped) {
+                HStack(spacing: 8) {
+                    Image(systemName: isInstalled ? "checkmark.circle.fill" : "plus.circle.fill")
+                    Text(isInstalled ? "Widget Active — Add Another" : "Add to Home Screen")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .foregroundStyle(.white)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(
+                            LinearGradient(
+                                colors: [.orange, .pink.opacity(0.85)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.06), radius: 15, x: 0, y: 5)
+        )
+    }
+}
+
+// MARK: - Status Badge
+
+private struct StatusBadge: View {
+    let isInstalled: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isInstalled ? Color.green : Color.orange)
+                .frame(width: 7, height: 7)
+            Text(isInstalled ? "Active" : "Not added")
+                .font(.caption)
+                .fontWeight(.medium)
+                .foregroundStyle(isInstalled ? .green : .orange)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(isInstalled ? Color.green.opacity(0.1) : Color.orange.opacity(0.1))
+        )
+    }
+}
+
+// MARK: - Size Pill
+
+private struct SizePill: View {
+    let size:       FoodWidgetSize
+    let isSelected: Bool
+    let namespace:  Namespace.ID
+
+    var body: some View {
+        ZStack {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.orange)
+                    .matchedGeometryEffect(id: "pill", in: namespace)
+            }
+
+            HStack(spacing: 5) {
+                Image(systemName: size.systemImageName)
+                    .font(.caption)
+                Text(size.rawValue)
+                    .font(.r(.subheadline, .medium))
+            }
+            .foregroundStyle(isSelected ? .white : .secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.clear : Color(.secondarySystemBackground))
+            )
+        }
+    }
+}
+
+// MARK: - Widget Preview
+
+/// Visual mock of the real widget — purely decorative so users know what to expect.
+private struct WidgetPreview: View {
+    let size: FoodWidgetSize
+
+    private let mockData = WidgetFoodData(
+        totalCalories: 1_243,
+        totalProtein:  45,
+        totalCarbs:    140,
+        totalFat:      38,
+        recentFoods: [
+            WidgetFoodItem(id: UUID(), name: "Chicken Rice",  calories: 420),
+            WidgetFoodItem(id: UUID(), name: "Greek Yogurt",  calories: 120),
+            WidgetFoodItem(id: UUID(), name: "Oatmeal Bowl",  calories: 280)
+        ],
+        calorieGoal:  2000,
+        proteinGoal:  60,
+        carbsGoal:    225,
+        fatGoal:      65,
+        lastUpdated:  .now
+    )
+
+    var body: some View {
+        Group {
+            switch size {
+            case .small:
+                SmallPreview(data: mockData)
+                    .frame(width: 130, height: 130)
+                    .frame(maxWidth: .infinity, alignment: .center)
+
+            case .medium:
+                MediumPreview(data: mockData)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 130)
+
+            case .large:
+                LargePreview(data: mockData)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 260)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(Color(.separator).opacity(0.5), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 10, x: 0, y: 4)
+    }
+}
+
+// MARK: Widget preview bodies (mirror the real widget views)
+
+private struct SmallPreview: View {
+    let data: WidgetFoodData
+
+    private var fraction: Double {
+        min(Double(data.totalCalories) / Double(data.calorieGoal), 1.0)
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(.systemBackground), Color.orange.opacity(0.07)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Today").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Image(systemName: "fork.knife").font(.system(size: 9)).foregroundStyle(.orange)
+                }
+                Spacer(minLength: 4)
+                // Mini ring
+                ZStack {
+                    Circle().stroke(Color.orange.opacity(0.18), lineWidth: 7)
+                    Circle()
+                        .trim(from: 0, to: fraction)
+                        .stroke(AngularGradient(colors: [.orange, .pink],
+                                               center: .center,
+                                               startAngle: .degrees(-90),
+                                               endAngle: .degrees(270)),
+                                style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    VStack(spacing: 0) {
+                        Text("\(data.totalCalories)").font(.system(size: 14, weight: .bold, design: .rounded))
+                        Text("cal").font(.system(size: 8)).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 62, height: 62)
+                Spacer(minLength: 4)
+                Text("\(data.calorieGoal - data.totalCalories) cal left")
+                    .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+                Spacer(minLength: 6)
+                HStack(spacing: 3) {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 8)).foregroundStyle(.orange)
+                    Text("Add Food").font(.system(size: 8, weight: .semibold))
+                }
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Capsule().fill(Color.orange.opacity(0.12)))
+            }
+            .padding(10)
+        }
+    }
+}
+
+private struct MediumPreview: View {
+    let data: WidgetFoodData
+
+    private var fraction: Double { min(Double(data.totalCalories) / Double(data.calorieGoal), 1.0) }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(.systemBackground), Color.orange.opacity(0.06)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            HStack(spacing: 0) {
+                VStack(spacing: 4) {
+                    Text("Today").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    ZStack {
+                        Circle().stroke(Color.orange.opacity(0.18), lineWidth: 7)
+                        Circle()
+                            .trim(from: 0, to: fraction)
+                            .stroke(AngularGradient(colors: [.orange, .pink],
+                                                   center: .center,
+                                                   startAngle: .degrees(-90),
+                                                   endAngle: .degrees(270)),
+                                    style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                        VStack(spacing: 0) {
+                            Text("\(data.totalCalories)").font(.system(size: 13, weight: .bold, design: .rounded))
+                            Text("cal").font(.system(size: 7)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 60, height: 60)
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus.circle.fill").font(.system(size: 7)).foregroundStyle(.orange)
+                        Text("Add").font(.system(size: 8, weight: .semibold)).foregroundStyle(.orange)
+                    }
+                }
+                .frame(width: 88)
+
+                Rectangle().fill(Color(.separator).opacity(0.4)).frame(width: 0.5).padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    MiniMacroBar(label: "Protein", value: data.totalProtein, goal: data.proteinGoal, color: .green)
+                    MiniMacroBar(label: "Carbs",   value: data.totalCarbs,   goal: data.carbsGoal,   color: .blue)
+                    MiniMacroBar(label: "Fat",     value: data.totalFat,     goal: data.fatGoal,     color: .orange)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+        }
+    }
+}
+
+private struct LargePreview: View {
+    let data: WidgetFoodData
+
+    private var fraction: Double { min(Double(data.totalCalories) / Double(data.calorieGoal), 1.0) }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(.systemBackground), Color.orange.opacity(0.06)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            VStack(alignment: .leading, spacing: 0) {
+                // Header
+                HStack(spacing: 4) {
+                    Image(systemName: "fork.knife.circle.fill").font(.system(size: 12)).foregroundStyle(.orange)
+                    Text("Nutrition").font(.system(size: 11, weight: .bold))
+                    Spacer()
+                    Text("Today").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 10)
+
+                // Calorie number
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text("\(data.totalCalories)")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(.orange)
+                    Text("/ \(data.calorieGoal) cal")
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 6)
+
+                // Calorie progress bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3).fill(Color.orange.opacity(0.15)).frame(height: 6)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(LinearGradient(colors: [.orange, .pink], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * fraction, height: 6)
+                    }
+                }
+                .frame(height: 6)
+                .padding(.bottom, 10)
+
+                Divider().padding(.bottom, 8)
+
+                VStack(spacing: 6) {
+                    MiniMacroBar(label: "Protein", value: data.totalProtein, goal: data.proteinGoal, color: .green)
+                    MiniMacroBar(label: "Carbs",   value: data.totalCarbs,   goal: data.carbsGoal,   color: .blue)
+                    MiniMacroBar(label: "Fat",     value: data.totalFat,     goal: data.fatGoal,     color: .orange)
+                }
+                .padding(.bottom, 10)
+
+                Divider().padding(.bottom, 8)
+
+                Text("Recent").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).padding(.bottom, 5)
+                VStack(spacing: 4) {
+                    ForEach(data.recentFoods.prefix(3)) { food in
+                        HStack(spacing: 5) {
+                            Circle().fill(Color.orange.opacity(0.35)).frame(width: 5, height: 5)
+                            Text(food.name).font(.system(size: 9)).lineLimit(1)
+                            Spacer()
+                            Text("\(food.calories)").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 5) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Food").fontWeight(.semibold)
+                }
+                .font(.system(size: 10))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(LinearGradient(colors: [.orange, .pink.opacity(0.85)],
+                                                          startPoint: .leading, endPoint: .trailing)))
+            }
+            .padding(12)
+        }
+    }
+}
+
+private struct MiniMacroBar: View {
+    let label: String
+    let value: Double
+    let goal:  Double
+    let color: Color
+
+    private var fraction: Double { min(value / max(goal, 1), 1.0) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(label).font(.system(size: 8)).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(value))g").font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2).fill(color.opacity(0.2)).frame(height: 4)
+                    RoundedRectangle(cornerRadius: 2).fill(color)
+                        .frame(width: geo.size.width * fraction, height: 4)
+                }
+            }
+            .frame(height: 4)
+        }
+    }
+}
+
+// MARK: - Instructions Sheet
+
+private struct WidgetInstructionsSheet: View {
+    let size: FoodWidgetSize
+    @Environment(\.dismiss) private var dismiss
+
+    private let steps: [(icon: String, color: Color, text: String)] = [
+        ("hand.tap.fill",               .blue,   "Long-press any empty area on your Home Screen until icons jiggle."),
+        ("plus.circle.fill",            .green,  "Tap the  +  button in the top-left corner."),
+        ("magnifyingglass",             .orange, "Search for WellPlate in the widget gallery."),
+        ("rectangle.3.group.fill",      .purple, "Swipe to choose your preferred size, then tap Add Widget."),
+        ("arrow.up.left.and.arrow.down.right", .pink, "Drag the widget wherever you like and tap Done.")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+
+                    // Header illustration
+                    VStack(spacing: 10) {
+                        Image(systemName: "rectangle.3.group.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.orange)
+                        Text("Add the Food Widget")
+                            .font(.r(.title3, .bold))
+                        Text("Follow these steps to add the \(size.rawValue) widget to your Home Screen.")
+                            .font(.r(.subheadline, .regular))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+
+                    // Step-by-step
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                            InstructionRow(number: index + 1,
+                                           icon: step.icon,
+                                           color: step.color,
+                                           text: step.text)
+                        }
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+
+                    // Tip
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "lightbulb.fill")
+                            .foregroundStyle(.yellow)
+                        Text("Tip: Once the widget is on your Home Screen, it refreshes automatically whenever you log food in the app.")
+                            .font(.r(.footnote, .regular))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.yellow.opacity(0.08))
+                    )
+                }
+                .padding(20)
+                .padding(.bottom, 16)
+            }
+            .navigationTitle("How to Add Widget")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+private struct InstructionRow: View {
+    let number: Int
+    let icon:   String
+    let color:  Color
+    let text:   String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle().fill(color.opacity(0.15)).frame(width: 36, height: 36)
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(color)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Step \(number)")
+                    .font(.r(.caption, .semibold))
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .font(.r(.subheadline, .regular))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: - Preview
 
 #Preview {
     ProfilePlaceholderView()
